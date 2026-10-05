@@ -237,6 +237,31 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .late{color:var(--danger)!important}
 .prio{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--pc)}
 
+/* reuniones */
+.mlist2{display:flex;flex-direction:column;gap:12px}
+.mmonth{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.14em;font-weight:600;margin:14px 4px 2px}
+.mcard{display:flex;gap:16px;padding:16px 18px;border-radius:20px;background:var(--panel);border:1px solid var(--line);cursor:pointer;transition:border-color .2s,transform .15s}
+.mcard:hover{border-color:var(--line2);transform:translateY(-1px)}
+.mday{width:58px;flex:none;text-align:center;border-radius:14px;padding:8px 0;background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.18),transparent 50%),rgba(96,165,250,.14);border:1px solid rgba(96,165,250,.35)}
+.mday b{display:block;font-family:"Space Grotesk";font-size:22px;line-height:1.1}
+.mday span{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.mbody{flex:1;min-width:0}
+.mbody h4{font-family:"Space Grotesk";font-size:16px;margin:0 0 4px}
+.mprev{color:var(--dim);font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;margin:0}
+.mfoot2{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:12px;color:var(--dim)}
+.whos{display:inline-flex}
+.whos .who{margin-left:-6px;border:2px solid #0B1512}
+.whos .who:first-child{margin-left:0}
+.msec{margin-top:18px}
+.msec h4{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.12em;margin:0 0 8px;font-family:Inter;font-weight:600}
+.msec p{margin:0;white-space:pre-wrap;line-height:1.6}
+.msec ul{margin:0;padding-left:18px;line-height:1.7}
+.mtask{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:12px;border:1px solid var(--line);margin-bottom:6px;cursor:pointer}
+.mtask:hover{border-color:var(--line2)}
+.mtask .chk{width:18px;height:18px;border-radius:6px;border:1.5px solid var(--line2);flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;background:transparent;color:#08120B;padding:0}
+.mtask.done .chk{background:var(--lime);border-color:var(--lime)}
+.mtask.done .tx{text-decoration:line-through;color:var(--dim)}
+.mtask .tx{flex:1;min-width:0}
 /* generador */
 .lgen{display:grid;grid-template-columns:220px minmax(300px,1fr) minmax(0,1.25fr);gap:16px;align-items:start}
 @media(max-width:1150px){.lgen{grid-template-columns:1fr}}
@@ -328,9 +353,9 @@ const CONFIG = {
 
 /* ========================================================= */
 const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
-const TABLES = ["projects","entries","notes","posts","tasks","landings"];
-const S = { projects:[], entries:[], notes:[], posts:[], tasks:[], landings:[], user:null };
-const UI = { cf:{}, chart:{}, month:null, pview:"mes", pf:[], tWho:"", tProj:"" };
+const TABLES = ["projects","entries","notes","posts","tasks","landings","meetings"];
+const S = { projects:[], entries:[], notes:[], posts:[], tasks:[], landings:[], meetings:[], user:null };
+const UI = { tView:"tablero", mq:"", cf:{}, chart:{}, month:null, pview:"mes", pf:[], tWho:"", tProj:"" };
 let sb = null, cur = null;
 
 const TYPES = {
@@ -495,6 +520,7 @@ const Store = {
   async remove(t, id){
     if (!DEMO){ const { error } = await sb.from(t).delete().eq("id", id); if (error) throw error; }
     S[t] = S[t].filter(r => r.id !== id);
+    if (t === "meetings") S.tasks.forEach(k => { if (k.meeting_id === id) k.meeting_id = null; });
     if (t === "projects"){ S.entries = S.entries.filter(e => e.project_id !== id); S.notes = S.notes.filter(n => n.project_id !== id); S.tasks.forEach(k => { if (k.project_id === id) k.project_id = null; }); }
     if (DEMO) DemoDB.save();
   }
@@ -1029,6 +1055,7 @@ function editPost(x, fecha){
    TAREAS — kanban
    ========================================================= */
 function renderTasks(v, p){
+  if (UI.tView === "reus") return renderMeetings(v, p);
   const f = t => (!UI.tWho || t.assignee === UI.tWho) && (!UI.tProj || (UI.tProj === "_none" ? !t.project_id : t.project_id === UI.tProj));
   const list = S.tasks.filter(f);
   const po = { alta:0, media:1, baja:2 };
@@ -1040,7 +1067,7 @@ function renderTasks(v, p){
       (items.length ? items.map(kcardHTML).join("") : '<div class="empty">Arrastrá tareas acá</div>') + "</div>";
   }).join("");
   const projOpts = S.projects.filter(x => x.type !== "tasks");
-  v.innerHTML = phead(p, '<button class="btn primary" data-act="newTask">+ Nueva tarea</button>') +
+  v.innerHTML = phead(p, '<button class="btn primary" data-act="newTask">+ Nueva tarea</button>') + viewTabs() +
     '<div class="kfilters"><div class="seg"><button class="' + (!UI.tWho ? "on" : "") + '" data-act="who" data-k="">Todos</button>' + CONFIG.TEAM.map(m => '<button class="' + (UI.tWho === m.name ? "on" : "") + '" data-act="who" data-k="' + esc(m.name) + '">' + esc(m.name) + "</button>").join("") + "</div>" +
     '<select class="inp sm" data-change="proj"><option value="">Todos los proyectos</option>' + projOpts.map(x => '<option value="' + x.id + '"' + (UI.tProj === x.id ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + '<option value="_none"' + (UI.tProj === "_none" ? " selected" : "") + ">Sin proyecto</option></select></div>" +
     '<div class="kanban">' + cols + "</div>";
@@ -1051,6 +1078,7 @@ function renderTasks(v, p){
     task: d => editTask(S.tasks.find(t => t.id === d.id)),
     toggle: d => { const t = S.tasks.find(x => x.id === d.id); act(() => Store.update("tasks", t.id, { status: t.status === "hecho" ? "pendiente" : "hecho", updated_at: new Date().toISOString() })); },
     who: d => { UI.tWho = d.k; render(); },
+    tView: d => { UI.tView = d.k; render(); },
     proj: (d, el) => { UI.tProj = el.value; render(); },
     __dragstart: e => { const c = e.target.closest(".kcard"); if (!c) return; dragId = c.dataset.id; c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", dragId); } catch(err){} },
     __dragend: e => { const c = e.target.closest(".kcard"); if (c) c.classList.remove("dragging"); v.querySelectorAll(".kcol.over").forEach(x => x.classList.remove("over")); },
@@ -1061,9 +1089,11 @@ function renderTasks(v, p){
 }
 function kcardHTML(t){
   const m = member(t.assignee), pr = PRIOS[t.priority] || PRIOS.media, pj = proj(t.project_id), late = t.status !== "hecho" && t.vence && t.vence < today();
+  const mt = t.meeting_id ? S.meetings.find(x => x.id === t.meeting_id) : null;
   return '<div class="kcard' + (t.status === "hecho" ? " done" : "") + '" draggable="true" data-act="task" data-id="' + t.id + '"><div class="tt"><button class="chk" data-act="toggle" data-id="' + t.id + '" aria-label="Marcar como hecha">' + (t.status === "hecho" ? "✓" : "") + "</button><span>" + esc(t.title) + "</span></div>" +
     (t.description ? '<div class="ds">' + esc(t.description) + "</div>" : "") +
     '<div class="kmeta"><span class="prio" style="--pc:' + pr.c + '">' + pr.l + "</span>" + (pj ? '<span class="chip" style="--c:' + esc(pj.color) + '"><i></i>' + esc(pj.name) + "</span>" : "") +
+    (mt ? '<span class="chip" style="--c:#60A5FA" title="' + esc(mt.titulo || "Reunión") + '"><i></i>Reu ' + esc(fmtD(mt.fecha)) + "</span>" : "") +
     (t.vence ? '<span class="' + (late ? "late" : "") + '">📅 ' + esc(fmtD(t.vence)) + "</span>" : "") + '<span style="flex:1"></span>' +
     (t.assignee ? '<span class="who" style="--ac:' + (m?.color || "#8FA398") + '" title="' + esc(t.assignee) + '">' + esc(initial(t.assignee)) + "</span>" : "") + "</div></div>";
 }
@@ -1078,10 +1108,111 @@ function editTask(t, defaults = {}){
       { k:"vence", l:"Fecha límite", t:"date" },
       { k:"status", l:"Estado", t:"select", o:Object.entries(TASK_STATUS).map(([v,l]) => ({ v, l })) },
       { k:"priority", l:"Prioridad", t:"select", o:Object.entries(PRIOS).map(([v,o]) => ({ v, l:o.l })) },
-      { k:"project_id", l:"Proyecto", t:"select", full:true, o:[{ v:"", l:"Sin proyecto" }, ...S.projects.filter(x => x.type !== "tasks").map(x => ({ v:x.id, l:x.name }))] }
+      { k:"project_id", l:"Proyecto", t:"select", full:true, o:[{ v:"", l:"Sin proyecto" }, ...S.projects.filter(x => x.type !== "tasks").map(x => ({ v:x.id, l:x.name }))] },
+      { k:"meeting_id", l:"Salió de la reunión", t:"select", full:true, o:[{ v:"", l:"—" }, ...sortedMeetings().map(x => ({ v:x.id, l:fmtD(x.fecha, {day:"numeric",month:"short",year:"numeric"}) + " · " + (x.titulo || "Reunión") }))] }
     ],
-    onSubmit: v => { v.project_id = v.project_id || null; v.updated_at = new Date().toISOString(); return t ? Store.update("tasks", t.id, v) : Store.insert("tasks", v); },
+    onSubmit: v => { v.project_id = v.project_id || null; v.meeting_id = v.meeting_id || null; v.updated_at = new Date().toISOString(); return t ? Store.update("tasks", t.id, v) : Store.insert("tasks", v); },
     onDelete: t ? () => Store.remove("tasks", t.id) : null
+  });
+}
+
+/* =========================================================
+   REUNIONES — registro con fecha, resumen, acuerdos y tareas
+   ========================================================= */
+function viewTabs(){
+  return '<div class="seg" style="margin-bottom:16px"><button class="' + (UI.tView !== "reus" ? "on" : "") + '" data-act="tView" data-k="tablero">Tablero de tareas</button><button class="' + (UI.tView === "reus" ? "on" : "") + '" data-act="tView" data-k="reus">Reuniones (' + S.meetings.length + ")</button></div>";
+}
+const sortedMeetings = () => [...S.meetings].sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)) || String(b.created_at).localeCompare(String(a.created_at)));
+const meetingTasks = m => S.tasks.filter(t => t.meeting_id === m.id);
+const lines = s => String(s || "").split("\n").map(x => x.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+function whosHTML(list){
+  return '<span class="whos">' + (list || []).map(n => { const m = member(n); return '<span class="who" style="--ac:' + (m?.color || "#8FA398") + '" title="' + esc(n) + '">' + esc(initial(n)) + "</span>"; }).join("") + "</span>";
+}
+function meetingCard(m){
+  const ts = meetingTasks(m), done = ts.filter(t => t.status === "hecho").length, d = parseD(m.fecha);
+  const ac = lines(m.acuerdos).length;
+  return '<div class="mcard" data-act="openMeeting" data-id="' + m.id + '"><div class="mday"><b>' + d.getDate() + "</b><span>" + esc(d.toLocaleDateString("es-UY", { month:"short" }).replace(".", "")) + '</span></div><div class="mbody"><h4>' + esc(m.titulo || "Reunión") + "</h4>" +
+    (m.resumen ? '<p class="mprev">' + esc(m.resumen) + "</p>" : '<p class="mprev">Sin resumen todavía.</p>') +
+    '<div class="mfoot2">' + whosHTML(m.asistentes) + (ac ? '<span class="chip">' + ac + " acuerdo" + (ac > 1 ? "s" : "") + "</span>" : "") +
+    (ts.length ? '<span class="chip" style="--c:' + (done === ts.length ? "#4ADE80" : "#FBBF24") + '"><i></i>' + done + "/" + ts.length + " tareas hechas</span>" : "") +
+    (m.link ? '<span class="chip">🔗 link</span>' : "") + "</div></div></div>";
+}
+function renderMeetings(v, p){
+  const q = slug(UI.mq || "").replace(/_/g, " ").trim();
+  const match = m => !q || slug([m.titulo, m.resumen, m.acuerdos, (m.asistentes || []).join(" ")].join(" ")).replace(/_/g, " ").includes(q);
+  const list = sortedMeetings().filter(match);
+  let html = "", lastM = "";
+  list.forEach(m => {
+    const d = parseD(m.fecha), key = d.getFullYear() + "-" + d.getMonth();
+    if (key !== lastM){ html += '<div class="mmonth">' + MONTHS[d.getMonth()] + " " + d.getFullYear() + "</div>"; lastM = key; }
+    html += meetingCard(m);
+  });
+  v.innerHTML = phead(p, '<button class="btn primary" data-act="newMeeting">+ Nueva reunión</button>') + viewTabs() +
+    '<div class="kfilters"><input class="inp" style="max-width:360px" placeholder="Buscar en reuniones…" value="' + esc(UI.mq) + '" data-change="mq"></div>' +
+    '<div class="mlist2">' + (html || (S.meetings.length ? '<div class="empty">No hay reuniones que coincidan con la búsqueda.</div>' : '<div class="empty">Todavía no hay reuniones registradas. Tocá <b>+ Nueva reunión</b> después de cada reu con Pablo y dejá el resumen, los acuerdos y las tareas que salieron.</div>')) + "</div>";
+  bind(v, {
+    editProject: () => editProject(p),
+    tView: d => { UI.tView = d.k; render(); },
+    newMeeting: () => editMeeting(null),
+    openMeeting: d => openMeeting(S.meetings.find(m => m.id === d.id)),
+    mq: (d, el) => { UI.mq = el.value; render(); }
+  });
+}
+function openMeeting(m){
+  if (!m) return;
+  const draw = () => {
+    const mm = S.meetings.find(x => x.id === m.id); if (!mm) return closeModal(false);
+    const ts = meetingTasks(mm).sort((a,b) => (a.status === "hecho") - (b.status === "hecho"));
+    const ac = lines(mm.acuerdos);
+    const box = openModal(
+      '<div class="mhead"><div><div class="eyebrow">' + esc(fmtD(mm.fecha, { weekday:"long", day:"numeric", month:"long", year:"numeric" })) + "</div><h3>" + esc(mm.titulo || "Reunión") + '</h3></div><button class="icon-btn" data-close aria-label="Cerrar">×</button></div>' +
+      ((mm.asistentes || []).length ? '<div class="mfoot2" style="margin-top:0">' + whosHTML(mm.asistentes) + "<span>" + esc(mm.asistentes.join(", ")) + "</span></div>" : "") +
+      '<div class="msec"><h4>Resumen</h4>' + (mm.resumen ? "<p>" + esc(mm.resumen) + "</p>" : '<p class="dim">Sin resumen.</p>') + "</div>" +
+      (ac.length ? '<div class="msec"><h4>Acuerdos</h4><ul>' + ac.map(a => "<li>" + esc(a) + "</li>").join("") + "</ul></div>" : "") +
+      (mm.link ? '<div class="msec"><h4>Link</h4><a href="' + esc(mm.link) + '" target="_blank" rel="noopener">' + esc(mm.link) + "</a></div>" : "") +
+      '<div class="msec"><h4>Tareas que salieron (' + ts.filter(t => t.status === "hecho").length + "/" + ts.length + " hechas)</h4>" +
+        (ts.length ? ts.map(t => { const mb = member(t.assignee); return '<div class="mtask' + (t.status === "hecho" ? " done" : "") + '" data-mt="edit" data-id="' + t.id + '"><button class="chk" data-mt="toggle" data-id="' + t.id + '">' + (t.status === "hecho" ? "✓" : "") + '</button><span class="tx">' + esc(t.title) + "</span>" + (t.vence ? '<span class="dim" style="font-size:12px">' + esc(fmtD(t.vence)) + "</span>" : "") + (t.assignee ? '<span class="who" style="--ac:' + (mb?.color || "#8FA398") + '">' + esc(initial(t.assignee)) + "</span>" : "") + "</div>"; }).join("") : '<div class="empty">No hay tareas asociadas a esta reunión.</div>') +
+      "</div>" +
+      '<div class="mfoot"><button class="btn" data-mt="addTask">+ Tarea de esta reunión</button><span class="sp"></span><button class="btn" data-mt="edit-m">Editar reunión</button><button class="btn primary" data-close>Listo</button></div>', { wide:true, nofocus:true });
+    box.addEventListener("click", async e => {
+      const b = e.target.closest("[data-mt]"); if (!b) return;
+      const k = b.dataset.mt;
+      if (k === "toggle"){ e.stopPropagation(); const t = S.tasks.find(x => x.id === b.dataset.id); if (!t) return; try { await Store.update("tasks", t.id, { status: t.status === "hecho" ? "pendiente" : "hecho", updated_at: new Date().toISOString() }); render(); draw(); } catch(err){ toast(err.message, true); } }
+      else if (k === "edit"){ const t = S.tasks.find(x => x.id === b.dataset.id); editTask(t); }
+      else if (k === "addTask") editTask(null, { meeting_id: mm.id });
+      else if (k === "edit-m") editMeeting(mm);
+    });
+  };
+  draw();
+}
+function editMeeting(m){
+  const others = (m?.asistentes || []).filter(n => !CONFIG.TEAM.some(t => t.name === n));
+  formModal({
+    title: m ? "Editar reunión" : "Nueva reunión", wide:true, submit: m ? "Guardar" : "Guardar reunión",
+    values: m ? { ...m, asistentes: (m.asistentes || []).filter(n => CONFIG.TEAM.some(t => t.name === n)), otros: others.join(", ") } : { fecha: today(), titulo:"Reunión semanal", asistentes: CONFIG.TEAM.map(t => t.name) },
+    fields: [
+      { k:"fecha", l:"Fecha de la reunión", t:"date", req:true },
+      { k:"titulo", l:"Título", req:true, ph:"Reunión semanal, planificación curso marzo…" },
+      { k:"asistentes", l:"Participaron", t:"multi", o:CONFIG.TEAM.map(t => ({ v:t.name, l:t.name })) },
+      { k:"otros", l:"Otros participantes", ph:"Separados por coma" },
+      { k:"resumen", l:"Resumen", t:"textarea", full:true, rows:8, ph:"Qué se habló, cómo vienen las campañas, ideas, problemas…" },
+      { k:"acuerdos", l:"Acuerdos / decisiones", t:"textarea", full:true, rows:4, ph:"Uno por línea", help:"Uno por línea." },
+      { k:"nuevas", l:"Tareas que salieron", t:"textarea", full:true, rows:4, ph:"Pablo: grabar reel de poda\nLorenzo: nuevos creativos huerta", help:"Una por línea. Se crean en el tablero de tareas vinculadas a esta reunión. Si empieza con <b>Pablo:</b> o <b>Lorenzo:</b> se asigna a esa persona." },
+      { k:"link", l:"Link (grabación, Drive, notas)", t:"url", full:true, ph:"https://" }
+    ],
+    onSubmit: async v => {
+      const asistentes = [...(v.asistentes || []), ...String(v.otros || "").split(",").map(s => s.trim()).filter(Boolean)];
+      const row = { fecha: v.fecha, titulo: v.titulo, asistentes, resumen: v.resumen, acuerdos: v.acuerdos, link: v.link, updated_at: new Date().toISOString() };
+      const saved = m ? await Store.update("meetings", m.id, row) : await Store.insert("meetings", row);
+      const mid = (saved && saved.id) || m?.id;
+      for (const l of lines(v.nuevas)){
+        const mt = l.match(/^([^:]{2,30}):\s*(.+)$/), who = mt && CONFIG.TEAM.find(t => slug(t.name) === slug(mt[1]));
+        await Store.insert("tasks", { title: who ? mt[2] : l, status:"pendiente", priority:"media", assignee: who ? who.name : "", meeting_id: mid, updated_at: new Date().toISOString() });
+      }
+      toast(m ? "Reunión actualizada" : "Reunión guardada" + (lines(v.nuevas).length ? " · " + lines(v.nuevas).length + " tareas creadas" : ""));
+      setTimeout(() => openMeeting(S.meetings.find(x => x.id === mid)), 50);
+    },
+    onDelete: m ? () => Store.remove("meetings", m.id) : null
   });
 }
 
@@ -1277,7 +1408,9 @@ function seedDemo(){
   ];
   const notes = [{ id: uid(), project_id: ces.id, kind:"link", title:"Administrador de anuncios", url:"https://adsmanager.facebook.com/", body:"", created_at: now }];
   const landings = [];
-  return { projects:[ces, cur, org, lan, tas], entries, notes, posts, tasks, landings };
+  const mt1 = { id: uid(), fecha: addDays(t0, -2), titulo:"Reunión semanal", asistentes:["Lorenzo","Pablo"], resumen:"Repasamos la campaña de huerta: el CPL viene subiendo en la última semana.\nPablo quiere empezar a armar el pack de Navidad.", acuerdos:"Renovar creativos de huerta\nDefinir precios del pack de Navidad antes del 15", link:"", created_at: now, updated_at: now };
+  tasks[1].meeting_id = mt1.id; tasks[2].meeting_id = mt1.id;
+  return { projects:[ces, cur, org, lan, tas], entries, notes, posts, tasks, landings, meetings:[mt1] };
 }
 
 boot();
