@@ -483,6 +483,16 @@ function evalFormula(expr, ctx){
   try { const r = Function('"use strict";return (' + js + ")")(); return isFinite(r) ? r : null; } catch(e){ return null; }
 }
 const inputsOf = p => (p.metrics || []).filter(m => m.kind !== "formula");
+/* métricas visibles (las ocultas se siguen calculando pero no se muestran) */
+const visMetrics = p => (p.metrics || []).filter(m => !m.hidden);
+/* métricas de anuncios: inversión y todo lo que se calcula con ella */
+function adKeys(p){
+  const ms = p.metrics || [], ks = new Set(ms.filter(m => m.kind !== "formula" && /^(inversion|gasto|spend)/.test(m.key)).map(m => m.key));
+  let grew = true;
+  while (grew){ grew = false; ms.forEach(m => { if (m.kind === "formula" && !ks.has(m.key) && [...ks].some(k => new RegExp("\\b" + k + "\\b").test(m.formula || ""))){ ks.add(m.key); grew = true; } }); }
+  return ks;
+}
+const hasAds = p => { const ks = adKeys(p); return !ks.size || (p.metrics || []).some(m => ks.has(m.key) && !m.hidden); };
 function withFormulas(p, base){
   const ctx = { ...base };
   (p.metrics || []).forEach(m => { if (m.kind === "formula") ctx[m.key] = evalFormula(m.formula, ctx); });
@@ -527,7 +537,7 @@ function filteredEntries(p){
   }
   return list.sort((x, y) => String(x.fecha).localeCompare(String(y.fecha)));
 }
-const heroMetric = p => (p.metrics || []).find(m => m.highlight) || (p.metrics || [])[0];
+const heroMetric = p => visMetrics(p).find(m => m.highlight) || visMetrics(p)[0];
 
 /* ---------- datos (Supabase o demo) ---------- */
 const DemoDB = {
@@ -761,15 +771,25 @@ function editProject(p){
     { k:"status", l:"Estado", t:"select", o:CAMP_STATUS.map(s => ({ v:s, l:s })) },
     { k:"color", l:"Color de la burbuja", t:"colors", full:true },
     { k:"start_date", l:"Inicio", t:"date" }, { k:"end_date", l:"Fin", t:"date" },
+    ...(type === "campaign" ? [{ k:"ads", l:"¿Tiene anuncios pagos?", t:"select", full:true, o:[{ v:"si", l:"Sí, lleva anuncios (muestra inversión, CPL, Meta Ads)" }, { v:"no", l:"No, sin anuncios (oculta inversión, CPL y Meta Ads)" }], help:"No se borra nada: si después le ponés anuncios, vuelve a aparecer todo." }] : []),
     ...(type === "campaign" ? [{ k:"meta_match", l:"Campañas de Meta Ads", full:true, ph:"ej: cesped, pasto", help:"Palabras que aparecen en el nombre de las campañas de Meta que van a este proyecto, separadas por coma. Vacío = no se conecta a Meta." }] : []),
     { k:"description", l:"Descripción", t:"textarea", full:true, rows:5, ph:"Objetivo, público, oferta, presupuesto…" }
   ];
   formModal({
     title: isNew ? "Nuevo proyecto" : "Editar proyecto", fields, submit: isNew ? "Crear" : "Guardar",
-    values: p || { status:"Planificación", color:COLORS[S.projects.length % COLORS.length], type },
+    values: p ? { ...p, ads: hasAds(p) ? "si" : "no" } : { status:"Planificación", color:COLORS[S.projects.length % COLORS.length], type, ads:"si" },
     onSubmit: async v => {
+      const ads = v.ads; delete v.ads;
+      const applyAds = (ms, pr) => { const ks = adKeys({ metrics: ms }); return ms.map(m => ks.has(m.key) ? { ...m, hidden: ads === "no", highlight: ads === "no" ? false : m.highlight } : m); };
+      if (ads === "no") v.meta_match = "";
+      if ((v.type || type) === "campaign" && ads){
+        if (isNew) v.__ms = applyAds(baseMetrics());
+        else if ((ads === "si") !== hasAds(p)) v.metrics = applyAds(p.metrics || []);
+      }
+      if (v.metrics && ads === "no" && !v.metrics.some(m => m.highlight && !m.hidden)){ const f = v.metrics.find(m => !m.hidden); if (f) f.highlight = true; }
       if (isNew){
-        const row = { ...v, metrics: v.type === "campaign" ? baseMetrics() : [], sort: S.projects.length + 1 };
+        const ms0 = v.__ms; delete v.__ms;
+        const row = { ...v, metrics: v.type === "campaign" ? (ms0 || baseMetrics()) : [], sort: S.projects.length + 1 };
         const r = await Store.insert("projects", row); location.hash = "#/p/" + r.id;
       } else await Store.update("projects", p.id, v);
     },
@@ -852,8 +872,8 @@ function postRow(p){
    CAMPAÑA
    ========================================================= */
 function renderCampaign(v, p){
-  const ms = p.metrics || [];
-  const cf = campFilter(p), camps = metaCampaigns(p);
+  const ms = visMetrics(p), adsOn = hasAds(p);
+  const cf = campFilter(p), camps = adsOn ? metaCampaigns(p) : [];
   if (cf.camp && !camps.includes(cf.camp)) cf.camp = "";
   const ents = filteredEntries(p), tot = totals(p, ents);
   const RANGES = [["all","Todo"],["7","7 días"],["30","30 días"],["mes","Este mes"],["mespas","Mes pasado"],["custom","Fechas…"]];
@@ -867,8 +887,8 @@ function renderCampaign(v, p){
   const kpis = ms.map(m => kpiHTML(m, tot[m.key])).join("");
   const notes = S.notes.filter(n => n.project_id === p.id).sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
   const tasks = S.tasks.filter(t => t.project_id === p.id && t.status !== "hecho");
-  const inputs = inputsOf(p), forms = ms.filter(m => m.kind === "formula");
-  const metaOn = !DEMO && (p.meta_match || "").trim();
+  const inputs = ms.filter(m => m.kind !== "formula"), forms = ms.filter(m => m.kind === "formula");
+  const metaOn = adsOn && !DEMO && (p.meta_match || "").trim();
   v.innerHTML = phead(p, (metaOn ? '<button class="btn" data-act="metaSync" title="Traer inversión y leads de Meta Ads">↻ Meta Ads</button>' : "") + '<button class="btn" data-act="metrics">⚙ Métricas</button><button class="btn primary" data-act="newEntry">+ Cargar datos</button>') +
     (metaOn ? '<div class="help" style="margin:-10px 0 16px">Conectado a Meta Ads (campañas con: ' + esc(p.meta_match) + ') · se actualiza solo todos los días' + (S.metaLast ? " · última vez " + esc(new Date(S.metaLast).toLocaleString("es-UY", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : "") + "</div>" : "") +
     goalsHTML(p) + filterBar + '<div style="--c:' + esc(p.color) + '">' +
@@ -878,7 +898,7 @@ function renderCampaign(v, p){
     '<div class="panel"><h3>Descripción</h3>' + (p.description ? '<p class="pdesc">' + esc(p.description) + "</p>" : '<div class="empty">Sin descripción. <a href="#" data-act="editProject">Agregar</a></div>') + "</div></div>" +
     '<div class="panel" style="margin-top:18px"><h3>Registros <span class="dim" style="font-size:12px;font-weight:400;font-family:Inter">Los totales de arriba suman los registros del período filtrado · tocá una fila para editarla</span></h3>' +
       (ents.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Período</th>' + inputs.map(m => "<th>" + esc(m.name) + "</th>").join("") + forms.map(m => "<th>" + esc(m.name) + "</th>").join("") + "<th>Nota</th></tr></thead><tbody>" +
-        [...ents].reverse().map(e => { const c = entryCtx(p, e); return '<tr data-act="entry" data-id="' + e.id + '"><td>' + esc(fmtD(e.fecha, {day:"numeric",month:"short",year:"2-digit"})) + "</td><td>" + (e.source === "meta" ? '<span class="chip" style="--c:#3B82F6"><i></i>Meta</span>' : esc(e.label || "")) + "</td>" + inputs.map(m => "<td>" + fmtVal(c[m.key], m.unit) + "</td>").join("") + forms.map(m => '<td class="calc">' + fmtVal(c[m.key], m.unit) + "</td>").join("") + '<td class="dim">' + esc((e.note || "").slice(0, 40)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
+        [...ents].reverse().map(e => { const c = entryCtx(p, e); return '<tr data-act="entry" data-id="' + e.id + '"><td>' + esc(fmtD(e.fecha, {day:"numeric",month:"short",year:"2-digit"})) + "</td><td>" + (e.source === "meta" && adsOn ? '<span class="chip" style="--c:#3B82F6"><i></i>Meta</span>' : esc(e.label || "")) + "</td>" + inputs.map(m => "<td>" + fmtVal(c[m.key], m.unit) + "</td>").join("") + forms.map(m => '<td class="calc">' + fmtVal(c[m.key], m.unit) + "</td>").join("") + '<td class="dim">' + esc((e.note || "").slice(0, 40)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
         : (cf.r !== "all" || cf.camp) ? '<div class="empty">No hay registros con estos filtros.</div>' : '<div class="empty">Todavía no hay datos. Tocá <b>+ Cargar datos</b> para sumar el primer registro (por ejemplo, los números de la semana).</div>') + "</div>" +
     '<div class="cols2"><div class="panel"><h3>Notas y links <button class="btn sm" data-act="newNote">+ Agregar</button></h3><div class="notes">' +
       (notes.length ? notes.map(noteHTML).join("") : '<div class="empty">Guardá acá ideas, creativos, links a Meta Ads, GHL, Drive…</div>') + "</div></div>" +
@@ -951,7 +971,7 @@ function editGoal(p, i){
     values: g || {},
     fields: [
       { k:"texto", l:"Meta", full:true, req:true, ph:"Ej: Llegar a 80 inscriptos antes del 1 de marzo" },
-      { k:"metric", l:"Medirla con (opcional)", t:"select", o:[{ v:"", l:"— la marco a mano —" }, ...(p.metrics || []).map(m => ({ v:m.key, l:m.name + (m.lower_better ? " (menos es mejor)" : "") }))] },
+      { k:"metric", l:"Medirla con (opcional)", t:"select", o:[{ v:"", l:"— la marco a mano —" }, ...visMetrics(p).map(m => ({ v:m.key, l:m.name + (m.lower_better ? " (menos es mejor)" : "") }))] },
       { k:"objetivo", l:"Número objetivo", t:"number", ph:"Ej: 80" },
       { k:"limite", l:"Fecha límite (opcional)", t:"date" },
       { k:"nota", l:"Notas", t:"textarea", full:true, rows:2, help:"Si elegís una métrica y un número, el avance se calcula solo con los datos de la campaña. Si no, la tildás cuando se cumpla." }
@@ -980,7 +1000,7 @@ function noteHTML(n){
   return '<div class="note" data-act="note" data-id="' + n.id + '"><b>' + (n.kind === "link" ? "🔗 " : "") + esc(n.title || "(sin título)") + "</b>" + (n.body ? "<p>" + esc(n.body) + "</p>" : "") + (n.url ? '<a href="' + esc(n.url) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(n.url) + "</a>" : "") + "</div>";
 }
 function editEntry(p, e){
-  const ins = inputsOf(p);
+  const ins = inputsOf(p).filter(m => !m.hidden);
   if (!ins.length){ toast("Primero configurá las métricas de carga manual", true); return openMetrics(p); }
   const vals = { fecha: e?.fecha || today(), label: e?.label || "", note: e?.note || "" };
   ins.forEach(m => vals["m_" + m.key] = e?.vals?.[m.key] ?? "");
@@ -1020,7 +1040,7 @@ function openMetrics(p){
     const box = openModal(
       '<div class="mhead"><h3>Métricas · ' + esc(p.name) + '</h3><button class="icon-btn" data-close aria-label="Cerrar">×</button></div>' +
       '<p class="help" style="margin-top:0">Las de <b>carga manual</b> se cargan en cada registro y se suman. Las <b>calculadas</b> usan una fórmula con las claves de otras métricas (ej: <code>inversion / leads</code>). La marcada con ★ es la que se ve en la burbuja.</p>' +
-      '<div class="mlist">' + (ms.map((m, i) => '<div class="mrow"><div><b>' + (m.highlight ? "★ " : "") + esc(m.name) + "</b> <code>" + esc(m.key) + '</code><div class="help">' + (m.kind === "formula" ? "= " + esc(m.formula) : "Carga manual") + (m.unit ? " · " + esc(m.unit) : "") + (m.goal != null && m.goal !== "" ? " · Meta " + fmtVal(Number(m.goal), m.unit) : "") + (m.lower_better ? " · menor es mejor" : "") + '</div></div><div class="mbtns">' + (i > 0 ? '<button class="icon-btn" data-m="up" data-i="' + i + '" title="Subir">↑</button>' : "") + '<button class="icon-btn" data-m="edit" data-i="' + i + '" title="Editar">✎</button></div></div>').join("") || '<div class="empty">Sin métricas.</div>') + "</div>" +
+      '<div class="mlist">' + (ms.map((m, i) => '<div class="mrow"><div><b>' + (m.highlight ? "★ " : "") + esc(m.name) + "</b> <code>" + esc(m.key) + '</code><div class="help">' + (m.kind === "formula" ? "= " + esc(m.formula) : "Carga manual") + (m.unit ? " · " + esc(m.unit) : "") + (m.goal != null && m.goal !== "" ? " · Meta " + fmtVal(Number(m.goal), m.unit) : "") + (m.lower_better ? " · menor es mejor" : "") + (m.hidden ? ' · <span style="color:var(--warn,#FBBF24)">oculta</span>' : "") + '</div></div><div class="mbtns">' + (i > 0 ? '<button class="icon-btn" data-m="up" data-i="' + i + '" title="Subir">↑</button>' : "") + '<button class="icon-btn" data-m="edit" data-i="' + i + '" title="Editar">✎</button></div></div>').join("") || '<div class="empty">Sin métricas.</div>') + "</div>" +
       '<div class="mfoot"><button class="btn" data-m="add">+ Agregar métrica</button><span class="sp"></span><button class="btn primary" data-close>Listo</button></div>', { wide:true, nofocus:true });
     box.addEventListener("click", async e => {
       const b = e.target.closest("[data-m]"); if (!b) return; const i = +b.dataset.i;
@@ -1044,13 +1064,14 @@ function metricForm(p, i, back){
       { k:"formula", l:"Fórmula (solo si es calculada)", full:true, ph:"ventas / leads * 100", help:"Claves disponibles: " + keys + ". Podés usar + − * / y paréntesis." },
       { k:"goal", l:"Meta (opcional)", t:"number" },
       { k:"lower_better", l:"Menor es mejor (ej: CPL)", t:"checkbox" },
-      { k:"highlight", l:"Mostrar en la burbuja ★", t:"checkbox", full:true }
+      { k:"highlight", l:"Mostrar en la burbuja ★", t:"checkbox", full:true },
+      { k:"hidden", l:"Ocultar esta métrica (no se borra, solo no se muestra)", t:"checkbox", full:true }
     ],
     onSubmit: async v => {
       if (v.kind === "formula" && evalFormula(v.formula, {}) === null && !/[A-Za-z_]/.test(v.formula || "")){ toast("Revisá la fórmula", true); return false; }
       let key = m?.key;
       if (!key){ key = slug(v.name); let k2 = key, n = 2; while (ms.some(x => x.key === k2)) k2 = key + "_" + n++; key = k2; }
-      const nm = { key, name:v.name, unit:v.unit, kind:v.kind, formula: v.kind === "formula" ? v.formula : "", goal: v.goal, lower_better: v.lower_better, highlight: v.highlight };
+      const nm = { key, name:v.name, unit:v.unit, kind:v.kind, formula: v.kind === "formula" ? v.formula : "", goal: v.goal, lower_better: v.lower_better, highlight: v.hidden ? false : v.highlight, hidden: !!v.hidden };
       let a = [...ms]; if (nm.highlight) a = a.map(x => ({ ...x, highlight:false }));
       if (m) a[i] = nm; else a.push(nm);
       await saveMetrics(p, a); closeModal(false); back(); return false;
