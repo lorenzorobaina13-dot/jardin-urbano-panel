@@ -140,6 +140,10 @@ label.f{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;font-wei
 .phead .sp{flex:1}
 .pdesc{white-space:pre-wrap;color:var(--dim);margin:0}
 
+/* filtros */
+.fbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 16px}
+.fbar .seg{flex-wrap:wrap}
+.fbar select.inp{max-width:320px}
 /* KPIs */
 .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:14px}
 .kpi{padding:18px;border-radius:18px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
@@ -326,7 +330,7 @@ const CONFIG = {
 const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
 const TABLES = ["projects","entries","notes","posts","tasks","landings"];
 const S = { projects:[], entries:[], notes:[], posts:[], tasks:[], landings:[], user:null };
-const UI = { chart:{}, month:null, pview:"mes", pf:[], tWho:"", tProj:"" };
+const UI = { cf:{}, chart:{}, month:null, pview:"mes", pf:[], tWho:"", tProj:"" };
 let sb = null, cur = null;
 
 const TYPES = {
@@ -425,9 +429,9 @@ function withFormulas(p, base){
   (p.metrics || []).forEach(m => { if (m.kind === "formula") ctx[m.key] = evalFormula(m.formula, ctx); });
   return ctx;
 }
-function totals(p){
+function totals(p, list){
   const t = {}; inputsOf(p).forEach(m => t[m.key] = null);
-  S.entries.filter(e => e.project_id === p.id).forEach(e => inputsOf(p).forEach(m => {
+  (list || S.entries.filter(e => e.project_id === p.id)).forEach(e => inputsOf(p).forEach(m => {
     const v = parseFloat(e.vals?.[m.key]); if (isFinite(v)) t[m.key] = (t[m.key] || 0) + v;
   }));
   return withFormulas(p, t);
@@ -435,6 +439,31 @@ function totals(p){
 function entryCtx(p, e){
   const b = {}; inputsOf(p).forEach(m => { const v = parseFloat(e.vals?.[m.key]); b[m.key] = isFinite(v) ? v : null; });
   return withFormulas(p, b);
+}
+/* filtros del tablero de campaña: fechas + campaña de Meta */
+function campFilter(p){ return UI.cf[p.id] || (UI.cf[p.id] = { r:"all", from:"", to:"", camp:"" }); }
+function rangeOf(f){
+  const t0 = today(), d = new Date();
+  if (f.r === "7") return [addDays(t0, -6), t0];
+  if (f.r === "30") return [addDays(t0, -29), t0];
+  if (f.r === "mes") return [ymd(new Date(d.getFullYear(), d.getMonth(), 1)), t0];
+  if (f.r === "mespas") return [ymd(new Date(d.getFullYear(), d.getMonth() - 1, 1)), ymd(new Date(d.getFullYear(), d.getMonth(), 0))];
+  if (f.r === "custom") return [f.from || "0000-01-01", f.to || "9999-12-31"];
+  return ["0000-01-01", "9999-12-31"];
+}
+function metaCampaigns(p){
+  const s = new Set();
+  S.entries.forEach(e => { if (e.project_id === p.id && e.vals && e.vals.por_campana) Object.keys(e.vals.por_campana).forEach(k => s.add(k)); });
+  return [...s].sort();
+}
+function filteredEntries(p){
+  const f = campFilter(p), [a, b] = rangeOf(f);
+  let list = S.entries.filter(e => e.project_id === p.id && String(e.fecha) >= a && String(e.fecha) <= b);
+  if (f.camp){
+    list = list.filter(e => e.vals && e.vals.por_campana && e.vals.por_campana[f.camp])
+      .map(e => ({ ...e, vals: { ...e.vals.por_campana[f.camp] } }));
+  }
+  return list.sort((x, y) => String(x.fecha).localeCompare(String(y.fecha)));
 }
 const heroMetric = p => (p.metrics || []).find(m => m.highlight) || (p.metrics || [])[0];
 
@@ -762,8 +791,16 @@ function postRow(p){
    CAMPAÑA
    ========================================================= */
 function renderCampaign(v, p){
-  const ms = p.metrics || [], tot = totals(p);
-  const ents = S.entries.filter(e => e.project_id === p.id).sort((a,b) => String(a.fecha).localeCompare(String(b.fecha)));
+  const ms = p.metrics || [];
+  const cf = campFilter(p), camps = metaCampaigns(p);
+  if (cf.camp && !camps.includes(cf.camp)) cf.camp = "";
+  const ents = filteredEntries(p), tot = totals(p, ents);
+  const RANGES = [["all","Todo"],["7","7 días"],["30","30 días"],["mes","Este mes"],["mespas","Mes pasado"],["custom","Fechas…"]];
+  const filterBar = '<div class="fbar"><div class="seg">' + RANGES.map(([k,l]) => '<button class="' + (cf.r === k ? "on" : "") + '" data-act="fRange" data-k="' + k + '">' + l + "</button>").join("") + "</div>" +
+    (cf.r === "custom" ? '<input type="date" class="inp sm" data-change="fFrom" value="' + esc(cf.from) + '"><span class="dim">→</span><input type="date" class="inp sm" data-change="fTo" value="' + esc(cf.to) + '">' : "") +
+    (camps.length ? '<select class="inp sm" data-change="fCamp"><option value="">Todas las campañas</option>' + camps.map(c => '<option value="' + esc(c) + '"' + (c === cf.camp ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select>" : "") +
+    ((cf.r !== "all" || cf.camp) ? '<button class="btn sm ghost" data-act="fClear">Limpiar filtros</button>' : "") +
+    (cf.camp ? '<span class="help" style="margin:0">Filtrando por una campaña de Meta: ventas e ingresos cargados a mano no se incluyen.</span>' : "") + "</div>";
   let sel = UI.chart[p.id]; if (!ms.find(m => m.key === sel)) sel = heroMetric(p)?.key;
   const selM = ms.find(m => m.key === sel);
   const kpis = ms.map(m => kpiHTML(m, tot[m.key])).join("");
@@ -773,15 +810,15 @@ function renderCampaign(v, p){
   const metaOn = !DEMO && (p.meta_match || "").trim();
   v.innerHTML = phead(p, (metaOn ? '<button class="btn" data-act="metaSync" title="Traer inversión y leads de Meta Ads">↻ Meta Ads</button>' : "") + '<button class="btn" data-act="metrics">⚙ Métricas</button><button class="btn primary" data-act="newEntry">+ Cargar datos</button>') +
     (metaOn ? '<div class="help" style="margin:-10px 0 16px">Conectado a Meta Ads (campañas con: ' + esc(p.meta_match) + ') · se actualiza solo todos los días' + (S.metaLast ? " · última vez " + esc(new Date(S.metaLast).toLocaleString("es-UY", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : "") + "</div>" : "") +
-    '<div style="--c:' + esc(p.color) + '">' +
+    filterBar + '<div style="--c:' + esc(p.color) + '">' +
     (ms.length ? '<div class="kpis">' + kpis + "</div>" : '<div class="empty">Esta campaña no tiene métricas todavía. <a href="#" data-act="metrics">Configurá las métricas</a>.</div>') +
     '<div class="cols-main"><div class="panel"><h3>Evolución ' + (ms.length ? '<select class="inp sm" data-change="chartSel">' + ms.map(m => '<option value="' + esc(m.key) + '"' + (m.key === sel ? " selected" : "") + ">" + esc(m.name) + "</option>").join("") + "</select>" : "") + "</h3>" +
-      (selM ? lineChart(ents.map(e => ({ x: e.label || fmtD(e.fecha), y: entryCtx(p, e)[sel] })), p.color, selM.unit) : '<div class="empty">Sin métricas.</div>') + "</div>" +
+      (selM ? lineChart(ents.map(e => ({ x: e.source === "meta" ? fmtD(e.fecha) : (e.label || fmtD(e.fecha)), y: entryCtx(p, e)[sel] })), p.color, selM.unit) : '<div class="empty">Sin métricas.</div>') + "</div>" +
     '<div class="panel"><h3>Descripción</h3>' + (p.description ? '<p class="pdesc">' + esc(p.description) + "</p>" : '<div class="empty">Sin descripción. <a href="#" data-act="editProject">Agregar</a></div>') + "</div></div>" +
-    '<div class="panel" style="margin-top:18px"><h3>Registros <span class="dim" style="font-size:12px;font-weight:400;font-family:Inter">Los totales de arriba suman todos los registros · tocá una fila para editarla</span></h3>' +
+    '<div class="panel" style="margin-top:18px"><h3>Registros <span class="dim" style="font-size:12px;font-weight:400;font-family:Inter">Los totales de arriba suman los registros del período filtrado · tocá una fila para editarla</span></h3>' +
       (ents.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Período</th>' + inputs.map(m => "<th>" + esc(m.name) + "</th>").join("") + forms.map(m => "<th>" + esc(m.name) + "</th>").join("") + "<th>Nota</th></tr></thead><tbody>" +
         [...ents].reverse().map(e => { const c = entryCtx(p, e); return '<tr data-act="entry" data-id="' + e.id + '"><td>' + esc(fmtD(e.fecha, {day:"numeric",month:"short",year:"2-digit"})) + "</td><td>" + (e.source === "meta" ? '<span class="chip" style="--c:#3B82F6"><i></i>Meta</span>' : esc(e.label || "")) + "</td>" + inputs.map(m => "<td>" + fmtVal(c[m.key], m.unit) + "</td>").join("") + forms.map(m => '<td class="calc">' + fmtVal(c[m.key], m.unit) + "</td>").join("") + '<td class="dim">' + esc((e.note || "").slice(0, 40)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
-        : '<div class="empty">Todavía no hay datos. Tocá <b>+ Cargar datos</b> para sumar el primer registro (por ejemplo, los números de la semana).</div>') + "</div>" +
+        : (cf.r !== "all" || cf.camp) ? '<div class="empty">No hay registros con estos filtros.</div>' : '<div class="empty">Todavía no hay datos. Tocá <b>+ Cargar datos</b> para sumar el primer registro (por ejemplo, los números de la semana).</div>') + "</div>" +
     '<div class="cols2"><div class="panel"><h3>Notas y links <button class="btn sm" data-act="newNote">+ Agregar</button></h3><div class="notes">' +
       (notes.length ? notes.map(noteHTML).join("") : '<div class="empty">Guardá acá ideas, creativos, links a Meta Ads, GHL, Drive…</div>') + "</div></div>" +
     '<div class="panel"><h3>Tareas de esta campaña <button class="btn sm" data-act="newTask">+ Tarea</button></h3>' +
@@ -803,6 +840,11 @@ function renderCampaign(v, p){
     newEntry: () => editEntry(p, null),
     entry: d => editEntry(p, S.entries.find(e => e.id === d.id)),
     chartSel: (d, el) => { UI.chart[p.id] = el.value; render(); },
+    fRange: d => { cf.r = d.k; if (d.k === "custom" && !cf.from){ cf.from = addDays(today(), -29); cf.to = today(); } render(); },
+    fFrom: (d, el) => { cf.from = el.value; render(); },
+    fTo: (d, el) => { cf.to = el.value; render(); },
+    fCamp: (d, el) => { cf.camp = el.value; render(); },
+    fClear: () => { cf.r = "all"; cf.camp = ""; render(); },
     newNote: () => editNote(p, null),
     note: d => editNote(p, S.notes.find(n => n.id === d.id)),
     newTask: () => editTask(null, { project_id: p.id }),
