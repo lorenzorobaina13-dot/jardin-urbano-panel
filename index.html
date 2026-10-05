@@ -320,6 +320,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow-y:auto}
 .mbox{width:100%;max-width:540px;background:#0B1512;border:1px solid var(--line2);border-radius:26px;padding:22px;box-shadow:0 40px 100px -30px #000;animation:pop .2s ease}
 .mbox.wide{max-width:720px}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.dcard{padding:18px;border-radius:18px;background:var(--panel);border:1px solid var(--line);cursor:pointer;transition:border-color .2s,transform .2s;min-width:0}
+.dcard:hover{border-color:var(--c,var(--line2));transform:translateY(-2px)}
+.dcard b{display:block;font-size:15px;margin-bottom:6px;overflow-wrap:anywhere}
+.dcard p{margin:0;color:var(--dim2);font-size:13px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}
+.dcard .dfoot{margin-top:10px;font-size:11px;color:var(--dim2)}
+.doc-body{font-size:14px;line-height:1.65;max-height:62vh;overflow:auto;overflow-wrap:anywhere;padding-right:4px}
+.doc-body h2{font-size:18px;margin:16px 0 6px}.doc-body h3{font-size:15px;margin:14px 0 4px}
+.doc-body p{margin:0 0 10px}.doc-body ul,.doc-body ol{margin:0 0 10px;padding-left:22px}.doc-body li{margin:2px 0}
+.doc-body a{color:var(--c,#A3D65C)}
+.doc-ta{min-height:46vh;font-family:inherit;line-height:1.55}
 @keyframes pop{from{transform:scale(.97);opacity:0}}
 .mhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .mhead h3{font-size:19px}
@@ -396,7 +407,8 @@ const TYPES = {
   campaign:{ l:"Campaña", ic:"◉" },
   organic:{ l:"Contenido orgánico", ic:"▦" },
   landing:{ l:"Generador de landings", ic:"⧉" },
-  tasks:{ l:"Tareas", ic:"✓" }
+  tasks:{ l:"Tareas", ic:"✓" },
+  docs:{ l:"Documentación", ic:"❏" }
 };
 const CAMP_STATUS = ["Planificación","Activa","Pausada","Finalizada"];
 const PLATFORMS = {
@@ -674,7 +686,7 @@ function render(opt = {}){
   const v = $("#view");
   if (!cur) return renderHome(v);
   const p = proj(cur); if (!p){ location.hash = "#/"; return; }
-  ({ campaign:renderCampaign, organic:renderOrganic, landing:renderLanding, tasks:renderTasks }[p.type] || renderCampaign)(v, p, !!opt.soft);
+  ({ campaign:renderCampaign, organic:renderOrganic, landing:renderLanding, tasks:renderTasks, docs:renderDocs }[p.type] || renderCampaign)(v, p, !!opt.soft);
 }
 function sortedProjects(){ return [...S.projects].sort((a,b) => (a.sort||0) - (b.sort||0) || String(a.created_at).localeCompare(String(b.created_at))); }
 function renderNav(){
@@ -823,6 +835,7 @@ function bubbleStat(p){
   if (p.type === "organic"){ const t0 = today(), wk = addDays(t0, 7); const n = S.posts.filter(x => x.fecha && x.fecha >= t0 && x.fecha <= wk).length; return n ? { big: n, lbl: "grabaciones esta semana" } : { big: S.posts.filter(x => !x.fecha).length, lbl: "ideas guardadas" }; }
   if (p.type === "tasks") return { big: S.tasks.filter(t => t.status !== "hecho").length, lbl: "pendientes" };
   if (p.type === "landing") return { big: S.landings.length, lbl: "landings guardadas" };
+  if (p.type === "docs") return { big: S.notes.filter(n => n.project_id === p.id).length, lbl: "documentos" };
   return { big:"", lbl:"" };
 }
 function renderHome(v){
@@ -1078,6 +1091,55 @@ function metricForm(p, i, back){
     },
     onDelete: m ? async () => { const a = ms.filter((_, j) => j !== i); await saveMetrics(p, a); setTimeout(back, 0); } : null
   });
+}
+
+/* =========================================================
+   DOCUMENTACIÓN — documentos, SOPs, guías (se guardan en notes con kind "doc")
+   ========================================================= */
+function docMD(t){
+  const inl = x => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  let h = "", list = "";
+  const close = () => { if (list){ h += "</" + list + ">"; list = ""; } };
+  String(t || "").split("\n").forEach(l => {
+    let m;
+    if ((m = l.match(/^#{1,2}\s+(.*)/))){ close(); h += (l.startsWith("##") ? "<h3>" : "<h2>") + inl(m[1]) + (l.startsWith("##") ? "</h3>" : "</h2>"); }
+    else if ((m = l.match(/^\s*[-*•]\s+(.*)/))){ if (list !== "ul"){ close(); h += "<ul>"; list = "ul"; } h += "<li>" + inl(m[1]) + "</li>"; }
+    else if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))){ if (list !== "ol"){ close(); h += "<ol>"; list = "ol"; } h += "<li>" + inl(m[1]) + "</li>"; }
+    else if (!l.trim()) close();
+    else { close(); h += "<p>" + inl(l) + "</p>"; }
+  });
+  close(); return h;
+}
+function renderDocs(v, p){
+  const docs = S.notes.filter(n => n.project_id === p.id).sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "es"));
+  v.innerHTML = phead(p, '<button class="btn primary" data-act="newDoc">+ Documento</button>') +
+    '<div style="--c:' + esc(p.color) + '">' +
+    (docs.length ? '<div class="dgrid">' + docs.map(d => '<div class="dcard" data-act="openDoc" data-id="' + d.id + '"><b>' + esc(d.title || "(sin título)") + "</b><p>" + esc(String(d.body || "").replace(/^#+\s*/gm, "").slice(0, 300)) + '</p><div class="dfoot">' + esc(d.kind && d.kind !== "doc" && d.kind !== "note" ? d.kind : "") + "</div></div>").join("") + "</div>"
+      : '<div class="empty">Todavía no hay documentos. Tocá <b>+ Documento</b> para escribir el primero: un SOP, un proceso, accesos, guiones base…</div>') + "</div>";
+  bind(v, {
+    editProject: () => editProject(p),
+    newDoc: () => editDoc(p, null),
+    openDoc: d => { const n = S.notes.find(x => x.id === d.id); if (n) openDoc(p, n); }
+  });
+}
+function openDoc(p, n){
+  const box = openModal('<div class="mhead" style="--c:' + esc(p.color) + '"><h3>' + esc(n.title || "(sin título)") + '</h3><button class="icon-btn" data-close aria-label="Cerrar">×</button></div>' +
+    '<div class="doc-body" style="--c:' + esc(p.color) + '">' + (docMD(n.body) || '<div class="empty">Documento vacío.</div>') + "</div>" +
+    '<div class="mfoot"><span class="sp"></span><button class="btn" data-copy>Copiar texto</button><button class="btn primary" data-edit>Editar</button></div>', { wide:true, nofocus:true });
+  box.querySelector("[data-edit]").onclick = () => editDoc(p, n);
+  box.querySelector("[data-copy]").onclick = async () => { try { await navigator.clipboard.writeText(n.body || ""); toast("Copiado"); } catch(e){ toast("No se pudo copiar", true); } };
+}
+function editDoc(p, n){
+  formModal({
+    title: n ? "Editar documento" : "Nuevo documento", wide:true, values: n || {},
+    fields: [
+      { k:"title", l:"Título", full:true, req:true, ph:"Ej: SOP · Cómo cargar una campaña nueva" },
+      { k:"body", l:"Contenido", t:"textarea", full:true, rows:18, ph:"Escribí libre. Tips: # Título, ## Subtítulo, - viñetas, 1. pasos numerados, **negrita**. Los links se vuelven clickeables." }
+    ],
+    onSubmit: v => n ? Store.update("notes", n.id, v) : Store.insert("notes", { ...v, kind:"doc", project_id: p.id }),
+    onDelete: n ? () => Store.remove("notes", n.id) : null
+  });
+  const ta = document.querySelector('#modal textarea[name="body"]'); if (ta) ta.classList.add("doc-ta");
 }
 
 /* =========================================================
@@ -1510,6 +1572,7 @@ function seedDemo(){
   const org = P({ name:"Contenido orgánico", type:"organic", color:"#C084FC", sort:3, description:"Planner de publicaciones de Instagram, Facebook y TikTok." });
   const lan = P({ name:"Generador de landings", type:"landing", color:"#FBBF24", sort:4 });
   const tas = P({ name:"Tareas pendientes", type:"tasks", color:"#60A5FA", sort:5 });
+  const doc = P({ name:"Documentación", type:"docs", color:"#F472B6", sort:6 });
   const E = (n, label, vals) => ({ id: uid(), project_id: ces.id, fecha: addDays(t0, n), label, vals, note:"", created_at: now });
   const entries = [ E(-28, "Semana 1", { inversion:4200, leads:38, ventas:4, ingresos:52000 }), E(-21, "Semana 2", { inversion:4500, leads:47, ventas:6, ingresos:81000 }), E(-14, "Semana 3", { inversion:4800, leads:61, ventas:7, ingresos:94000 }), E(-7, "Semana 4", { inversion:5000, leads:66, ventas:9, ingresos:118000 }) ];
   const T = (title, o) => ({ id: uid(), title, description:"", status:"pendiente", priority:"media", assignee:"Lorenzo", vence:null, project_id:null, created_at: now, updated_at: now, ...o });
@@ -1532,7 +1595,8 @@ function seedDemo(){
   const landings = [];
   const mt1 = { id: uid(), fecha: addDays(t0, -2), titulo:"Reunión semanal", asistentes:["Lorenzo","Pablo"], resumen:"Repasamos la campaña de huerta: el CPL viene subiendo en la última semana.\nPablo quiere empezar a armar el pack de Navidad.", acuerdos:"Renovar creativos de huerta\nDefinir precios del pack de Navidad antes del 15", link:"", created_at: now, updated_at: now };
   tasks[1].meeting_id = mt1.id; tasks[2].meeting_id = mt1.id;
-  return { projects:[ces, cur, org, lan, tas], entries, notes, posts, tasks, landings, meetings:[mt1] };
+  notes.push({ id: uid(), project_id: doc.id, kind:"doc", title:"SOP · Responder un lead nuevo", body:"# Objetivo\nQue ningún lead quede sin respuesta más de 1 hora.\n\n## Pasos\n1. Entra el lead desde Meta al CRM de GHL.\n2. Mandar el WhatsApp de bienvenida con el **PDF de la huerta**.\n3. Si no responde en 24 h, segundo mensaje.\n\n## Notas\n- Horario de respuesta: 9 a 19 h\n- Plantillas en https://app.gohighlevel.com", url:"", created_at: now });
+  return { projects:[ces, cur, org, lan, tas, doc], entries, notes, posts, tasks, landings, meetings:[mt1] };
 }
 
 boot();
