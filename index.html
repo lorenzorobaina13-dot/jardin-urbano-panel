@@ -533,6 +533,7 @@ async function start(){
   $("#meName").textContent = meName();
   const me = member(meName()); $("#meAv").textContent = initial(meName()); if (me) $("#meAv").style.setProperty("--ac", me.color);
   try { await Store.loadAll(); } catch(e){ console.error(e); $("#view").innerHTML = '<div class="loading">No se pudieron cargar los datos: ' + esc(e.message) + "<br>¿Corriste el SQL de configuración en Supabase?</div>"; return; }
+  if (!DEMO) loadMetaLast();
   if (!DEMO && !rt){
     rt = sb.channel("panel").on("postgres_changes", { event:"*", schema:"public" }, p => {
       if (!TABLES.includes(p.table)) return;
@@ -541,6 +542,10 @@ async function start(){
     }).subscribe();
   }
   route();
+}
+
+async function loadMetaLast(){
+  try { const { data } = await sb.from("app_config").select("value").eq("key", "meta_last_sync").maybeSingle(); S.metaLast = data ? data.value : null; } catch(e){}
 }
 
 /* ---------- router / render ---------- */
@@ -664,6 +669,7 @@ function editProject(p){
     { k:"status", l:"Estado", t:"select", o:CAMP_STATUS.map(s => ({ v:s, l:s })) },
     { k:"color", l:"Color de la burbuja", t:"colors", full:true },
     { k:"start_date", l:"Inicio", t:"date" }, { k:"end_date", l:"Fin", t:"date" },
+    ...(type === "campaign" ? [{ k:"meta_match", l:"Campañas de Meta Ads", full:true, ph:"ej: cesped, pasto", help:"Palabras que aparecen en el nombre de las campañas de Meta que van a este proyecto, separadas por coma. Vacío = no se conecta a Meta." }] : []),
     { k:"description", l:"Descripción", t:"textarea", full:true, rows:5, ph:"Objetivo, público, oferta, presupuesto…" }
   ];
   formModal({
@@ -764,7 +770,9 @@ function renderCampaign(v, p){
   const notes = S.notes.filter(n => n.project_id === p.id).sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
   const tasks = S.tasks.filter(t => t.project_id === p.id && t.status !== "hecho");
   const inputs = inputsOf(p), forms = ms.filter(m => m.kind === "formula");
-  v.innerHTML = phead(p, '<button class="btn" data-act="metrics">⚙ Métricas</button><button class="btn primary" data-act="newEntry">+ Cargar datos</button>') +
+  const metaOn = !DEMO && (p.meta_match || "").trim();
+  v.innerHTML = phead(p, (metaOn ? '<button class="btn" data-act="metaSync" title="Traer inversión y leads de Meta Ads">↻ Meta Ads</button>' : "") + '<button class="btn" data-act="metrics">⚙ Métricas</button><button class="btn primary" data-act="newEntry">+ Cargar datos</button>') +
+    (metaOn ? '<div class="help" style="margin:-10px 0 16px">Conectado a Meta Ads (campañas con: ' + esc(p.meta_match) + ') · se actualiza solo todos los días' + (S.metaLast ? " · última vez " + esc(new Date(S.metaLast).toLocaleString("es-UY", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : "") + "</div>" : "") +
     '<div style="--c:' + esc(p.color) + '">' +
     (ms.length ? '<div class="kpis">' + kpis + "</div>" : '<div class="empty">Esta campaña no tiene métricas todavía. <a href="#" data-act="metrics">Configurá las métricas</a>.</div>') +
     '<div class="cols-main"><div class="panel"><h3>Evolución ' + (ms.length ? '<select class="inp sm" data-change="chartSel">' + ms.map(m => '<option value="' + esc(m.key) + '"' + (m.key === sel ? " selected" : "") + ">" + esc(m.name) + "</option>").join("") + "</select>" : "") + "</h3>" +
@@ -772,7 +780,7 @@ function renderCampaign(v, p){
     '<div class="panel"><h3>Descripción</h3>' + (p.description ? '<p class="pdesc">' + esc(p.description) + "</p>" : '<div class="empty">Sin descripción. <a href="#" data-act="editProject">Agregar</a></div>') + "</div></div>" +
     '<div class="panel" style="margin-top:18px"><h3>Registros <span class="dim" style="font-size:12px;font-weight:400;font-family:Inter">Los totales de arriba suman todos los registros · tocá una fila para editarla</span></h3>' +
       (ents.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Período</th>' + inputs.map(m => "<th>" + esc(m.name) + "</th>").join("") + forms.map(m => "<th>" + esc(m.name) + "</th>").join("") + "<th>Nota</th></tr></thead><tbody>" +
-        [...ents].reverse().map(e => { const c = entryCtx(p, e); return '<tr data-act="entry" data-id="' + e.id + '"><td>' + esc(fmtD(e.fecha, {day:"numeric",month:"short",year:"2-digit"})) + "</td><td>" + esc(e.label || "") + "</td>" + inputs.map(m => "<td>" + fmtVal(c[m.key], m.unit) + "</td>").join("") + forms.map(m => '<td class="calc">' + fmtVal(c[m.key], m.unit) + "</td>").join("") + '<td class="dim">' + esc((e.note || "").slice(0, 40)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
+        [...ents].reverse().map(e => { const c = entryCtx(p, e); return '<tr data-act="entry" data-id="' + e.id + '"><td>' + esc(fmtD(e.fecha, {day:"numeric",month:"short",year:"2-digit"})) + "</td><td>" + (e.source === "meta" ? '<span class="chip" style="--c:#3B82F6"><i></i>Meta</span>' : esc(e.label || "")) + "</td>" + inputs.map(m => "<td>" + fmtVal(c[m.key], m.unit) + "</td>").join("") + forms.map(m => '<td class="calc">' + fmtVal(c[m.key], m.unit) + "</td>").join("") + '<td class="dim">' + esc((e.note || "").slice(0, 40)) + "</td></tr>"; }).join("") + "</tbody></table></div>"
         : '<div class="empty">Todavía no hay datos. Tocá <b>+ Cargar datos</b> para sumar el primer registro (por ejemplo, los números de la semana).</div>') + "</div>" +
     '<div class="cols2"><div class="panel"><h3>Notas y links <button class="btn sm" data-act="newNote">+ Agregar</button></h3><div class="notes">' +
       (notes.length ? notes.map(noteHTML).join("") : '<div class="empty">Guardá acá ideas, creativos, links a Meta Ads, GHL, Drive…</div>') + "</div></div>" +
@@ -781,6 +789,17 @@ function renderCampaign(v, p){
   bind(v, {
     editProject: () => editProject(p),
     metrics: () => openMetrics(p),
+    metaSync: async (d, el) => {
+      el.disabled = true; el.textContent = "Sincronizando…";
+      try {
+        const { data, error } = await sb.functions.invoke("meta-sync", { body: { days: 90 } });
+        if (error){ let m = error.message; try { m = (await error.context.json()).error || m; } catch(e){} throw new Error(m); }
+        if (data && data.error) throw new Error(data.error);
+        await Store.reload("entries"); await loadMetaLast();
+        toast("Meta Ads: " + data.registros + " días actualizados" + (data.sin_asignar && data.sin_asignar.length ? " · " + data.sin_asignar.length + " campañas sin proyecto" : ""));
+        render();
+      } catch(e){ toast("No se pudo sincronizar: " + e.message, true); el.disabled = false; el.textContent = "↻ Meta Ads"; }
+    },
     newEntry: () => editEntry(p, null),
     entry: d => editEntry(p, S.entries.find(e => e.id === d.id)),
     chartSel: (d, el) => { UI.chart[p.id] = el.value; render(); },
@@ -811,15 +830,15 @@ function editEntry(p, e){
   const vals = { fecha: e?.fecha || today(), label: e?.label || "", note: e?.note || "" };
   ins.forEach(m => vals["m_" + m.key] = e?.vals?.[m.key] ?? "");
   formModal({
-    title: e ? "Editar registro" : "Cargar datos", values: vals,
+    title: e ? (e.source === "meta" ? "Registro de Meta Ads" : "Editar registro") : "Cargar datos", values: vals,
     fields: [
       { k:"fecha", l:"Fecha", t:"date", req:true }, { k:"label", l:"Período (opcional)", ph:"Ej: Semana 1, Octubre…" },
       ...ins.map(m => ({ k:"m_" + m.key, l: m.name + (m.unit && m.unit !== "%" && m.unit !== "x" ? " (" + m.unit + ")" : ""), t:"number", ph:"0" })),
-      { k:"note", l:"Nota", t:"textarea", full:true, rows:2, ph:"Qué cambió esta semana, creativos nuevos, etc." }
+      { k:"note", l:"Nota", t:"textarea", full:true, rows:2, ph:"Qué cambió esta semana, creativos nuevos, etc.", help: e && e.source === "meta" ? "Este registro lo trae Meta Ads automáticamente: inversión y leads se vuelven a pisar en la próxima sincronización. Ventas e ingresos sí podés cargarlos acá." : "" }
     ],
     help: "",
     onSubmit: async v => {
-      const out = {}; ins.forEach(m => { const x = v["m_" + m.key]; if (x != null && isFinite(x)) out[m.key] = x; });
+      const out = { ...(e?.vals || {}) }; ins.forEach(m => { const x = v["m_" + m.key]; if (x != null && isFinite(x)) out[m.key] = x; else delete out[m.key]; });
       const row = { project_id: p.id, fecha: v.fecha, label: v.label, note: v.note, vals: out };
       if (e) await Store.update("entries", e.id, row); else await Store.insert("entries", row);
     },
