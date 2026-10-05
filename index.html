@@ -452,8 +452,11 @@ function rangeOf(f){
   return ["0000-01-01", "9999-12-31"];
 }
 function metaCampaigns(p){
-  const s = new Set();
-  S.entries.forEach(e => { if (e.project_id === p.id && e.vals && e.vals.por_campana) Object.keys(e.vals.por_campana).forEach(k => s.add(k)); });
+  const s = new Set(), [a, b] = rangeOf(campFilter(p));
+  S.entries.forEach(e => {
+    if (e.project_id !== p.id || !e.vals || !e.vals.por_campana || String(e.fecha) < a || String(e.fecha) > b) return;
+    Object.entries(e.vals.por_campana).forEach(([k, v]) => { if (Number(v && v.inversion) > 0) s.add(k); });
+  });
   return [...s].sort();
 }
 function filteredEntries(p){
