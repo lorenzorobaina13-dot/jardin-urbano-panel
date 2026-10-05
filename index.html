@@ -140,6 +140,20 @@ label.f{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;font-wei
 .phead .sp{flex:1}
 .pdesc{white-space:pre-wrap;color:var(--dim);margin:0}
 
+/* metas */
+.goals{margin-bottom:16px}
+.grow{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(0,0,0,.18);margin-bottom:8px;cursor:pointer}
+.grow:hover{border-color:var(--line2)}
+.grow .chk{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line2);flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;background:transparent;color:#08120B;padding:0;margin-top:1px}
+.grow.done .chk{background:var(--ok);border-color:var(--ok)}
+.grow .gico{width:20px;flex:none;text-align:center}
+.grow.done .gico{color:var(--ok);font-weight:700}
+.grow .gbody{flex:1;min-width:0}
+.grow .gt{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:600}
+.grow .gt .sp{flex:1}
+.grow .gt .dim,.grow .gt span:last-child{font-weight:400;font-size:12px}
+.grow.done .gt > span:first-child{color:var(--dim)}
+.grow .bar{margin-top:8px}
 /* filtros */
 .fbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 16px}
 .fbar .seg{flex-wrap:wrap}
@@ -857,7 +871,7 @@ function renderCampaign(v, p){
   const metaOn = !DEMO && (p.meta_match || "").trim();
   v.innerHTML = phead(p, (metaOn ? '<button class="btn" data-act="metaSync" title="Traer inversión y leads de Meta Ads">↻ Meta Ads</button>' : "") + '<button class="btn" data-act="metrics">⚙ Métricas</button><button class="btn primary" data-act="newEntry">+ Cargar datos</button>') +
     (metaOn ? '<div class="help" style="margin:-10px 0 16px">Conectado a Meta Ads (campañas con: ' + esc(p.meta_match) + ') · se actualiza solo todos los días' + (S.metaLast ? " · última vez " + esc(new Date(S.metaLast).toLocaleString("es-UY", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })) : "") + "</div>" : "") +
-    filterBar + '<div style="--c:' + esc(p.color) + '">' +
+    goalsHTML(p) + filterBar + '<div style="--c:' + esc(p.color) + '">' +
     (ms.length ? '<div class="kpis">' + kpis + "</div>" : '<div class="empty">Esta campaña no tiene métricas todavía. <a href="#" data-act="metrics">Configurá las métricas</a>.</div>') +
     '<div class="cols-main"><div class="panel"><h3>Evolución ' + (ms.length ? '<select class="inp sm" data-change="chartSel">' + ms.map(m => '<option value="' + esc(m.key) + '"' + (m.key === sel ? " selected" : "") + ">" + esc(m.name) + "</option>").join("") + "</select>" : "") + "</h3>" +
       (selM ? lineChart(ents.map(e => ({ x: e.source === "meta" ? fmtD(e.fecha) : (e.label || fmtD(e.fecha)), y: entryCtx(p, e)[sel] })), p.color, selM.unit) : '<div class="empty">Sin métricas.</div>') + "</div>" +
@@ -885,6 +899,9 @@ function renderCampaign(v, p){
       } catch(e){ toast("No se pudo sincronizar: " + e.message, true); el.disabled = false; el.textContent = "↻ Meta Ads"; }
     },
     newEntry: () => editEntry(p, null),
+    newGoal: () => editGoal(p, null),
+    goal: d => editGoal(p, +d.i),
+    goalToggle: async d => { const a = [...(p.metas || [])]; const i = +d.i; a[i] = { ...a[i], hecha: !a[i].hecha }; await act(() => saveGoals(p, a)); },
     entry: d => editEntry(p, S.entries.find(e => e.id === d.id)),
     chartSel: (d, el) => { UI.chart[p.id] = el.value; render(); },
     fRange: d => { cf.r = d.k; if (d.k === "custom" && !cf.from){ cf.from = addDays(today(), -29); cf.to = today(); } render(); },
@@ -896,6 +913,55 @@ function renderCampaign(v, p){
     note: d => editNote(p, S.notes.find(n => n.id === d.id)),
     newTask: () => editTask(null, { project_id: p.id }),
     task: d => editTask(S.tasks.find(t => t.id === d.id))
+  });
+}
+/* ---------- metas de la campaña ---------- */
+async function saveGoals(p, arr){ await Store.update("projects", p.id, { metas: arr }); p.metas = arr; }
+function goalState(p, g){
+  const m = g.metric ? (p.metrics || []).find(x => x.key === g.metric) : null;
+  const target = (g.objetivo === "" || g.objetivo == null) ? null : Number(g.objetivo);
+  if (!m || target == null || !isFinite(target)) return { manual:true, done: !!g.hecha };
+  const cur = totals(p)[m.key];
+  if (cur == null || !isFinite(cur)) return { m, target, cur:null, pct:0, done:false };
+  const done = m.lower_better ? cur <= target : cur >= target;
+  const pct = m.lower_better ? (cur <= 0 ? 1 : Math.min(target / cur, 1)) : Math.max(0, Math.min(cur / target, 1));
+  return { m, target, cur, pct, done };
+}
+function goalsHTML(p){
+  const gs = p.metas || [];
+  const t0 = today();
+  const rows = gs.map((g, i) => {
+    const s = goalState(p, g);
+    const dl = g.limite ? Math.round((parseD(g.limite) - parseD(t0)) / 864e5) : null;
+    const dlTxt = dl == null ? "" : s.done ? "" : dl < 0 ? '<span class="late">venció hace ' + (-dl) + " día" + (dl === -1 ? "" : "s") + "</span>" : dl === 0 ? '<span class="late">vence hoy</span>' : "<span>faltan " + dl + " día" + (dl === 1 ? "" : "s") + "</span>";
+    const prog = s.manual ? "" :
+      '<div class="bar"><i style="width:' + Math.round(s.pct * 100) + "%" + (s.done ? ";background:var(--ok)" : "") + '"></i></div>' +
+      '<div class="goal">' + fmtVal(s.cur, s.m.unit) + " de " + fmtVal(s.target, s.m.unit) + " · " + esc(s.m.name) + (s.m.lower_better ? " (menos es mejor)" : "") + (s.cur != null ? " · " + Math.round(s.pct * 100) + "%" : "") + "</div>";
+    return '<div class="grow' + (s.done ? " done" : "") + '" data-act="goal" data-i="' + i + '">' +
+      (s.manual ? '<button class="chk" data-act="goalToggle" data-i="' + i + '" aria-label="Marcar meta">' + (s.done ? "✓" : "") + "</button>" : '<span class="gico">' + (s.done ? "✓" : "🎯") + "</span>") +
+      '<div class="gbody"><div class="gt"><span>' + esc(g.texto || "Meta") + '</span><span class="sp"></span>' + (g.limite ? '<span class="dim">📅 ' + esc(fmtD(g.limite)) + "</span> " : "") + dlTxt + "</div>" + prog + "</div></div>";
+  }).join("");
+  return '<div class="panel goals" style="--c:' + esc(p.color) + '"><h3>🎯 Metas <button class="btn sm" data-act="newGoal">+ Meta</button></h3>' +
+    (rows || '<div class="empty">Escribí las metas de esta campaña: "Llegar a 80 inscriptos", "CPL menor a $ 40", "Abrir preventa el 15/1"… Si la atás a una métrica, el avance se calcula solo.</div>') + "</div>";
+}
+function editGoal(p, i){
+  const gs = p.metas || [], g = i == null ? null : gs[i];
+  formModal({
+    title: g ? "Editar meta" : "Nueva meta",
+    values: g || {},
+    fields: [
+      { k:"texto", l:"Meta", full:true, req:true, ph:"Ej: Llegar a 80 inscriptos antes del 1 de marzo" },
+      { k:"metric", l:"Medirla con (opcional)", t:"select", o:[{ v:"", l:"— la marco a mano —" }, ...(p.metrics || []).map(m => ({ v:m.key, l:m.name + (m.lower_better ? " (menos es mejor)" : "") }))] },
+      { k:"objetivo", l:"Número objetivo", t:"number", ph:"Ej: 80" },
+      { k:"limite", l:"Fecha límite (opcional)", t:"date" },
+      { k:"nota", l:"Notas", t:"textarea", full:true, rows:2, help:"Si elegís una métrica y un número, el avance se calcula solo con los datos de la campaña. Si no, la tildás cuando se cumpla." }
+    ],
+    onSubmit: async v => {
+      const ng = { texto: v.texto, metric: v.metric || "", objetivo: v.objetivo, limite: v.limite || "", nota: v.nota || "", hecha: g ? !!g.hecha : false };
+      const a = [...gs]; if (g) a[i] = ng; else a.push(ng);
+      await saveGoals(p, a);
+    },
+    onDelete: g ? async () => { await saveGoals(p, gs.filter((_, j) => j !== i)); } : null
   });
 }
 function kpiHTML(m, v){
@@ -1419,7 +1485,7 @@ function seedDemo(){
   const now = new Date().toISOString(), t0 = today();
   const P = o => ({ id: uid(), status:"Activa", description:"", metrics:[], start_date:null, end_date:null, sort:0, created_at: now, ...o });
   const ces = P({ name:"Campaña de césped", type:"campaign", color:"#A3D65C", sort:1, metrics: baseMetrics(), description:"Campaña de Meta Ads para venta e instalación de césped.\nObjetivo: leads por WhatsApp y formulario de GHL." });
-  const cur = P({ name:"Curso Marzo 2027", type:"campaign", color:"#2DD4BF", sort:2, status:"Planificación", metrics: cursoMetrics(), start_date:"2027-01-15", end_date:"2027-03-10", description:"Lanzamiento del curso de jardinería que arranca en marzo 2027." });
+  const cur = P({ name:"Curso Marzo 2027", type:"campaign", color:"#2DD4BF", sort:2, status:"Planificación", metrics: cursoMetrics(), metas:[{ texto:"Llegar a 80 inscriptos", metric:"inscriptos", objetivo:80, limite:"2027-03-01" }, { texto:"Abrir preventa con precio early bird", metric:"", objetivo:null, limite:"2027-01-15", hecha:false }], start_date:"2027-01-15", end_date:"2027-03-10", description:"Lanzamiento del curso de jardinería que arranca en marzo 2027." });
   const org = P({ name:"Contenido orgánico", type:"organic", color:"#C084FC", sort:3, description:"Planner de publicaciones de Instagram, Facebook y TikTok." });
   const lan = P({ name:"Generador de landings", type:"landing", color:"#FBBF24", sort:4 });
   const tas = P({ name:"Tareas pendientes", type:"tasks", color:"#60A5FA", sort:5 });
