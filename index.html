@@ -355,6 +355,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .doc-body p{margin:0 0 10px}.doc-body ul,.doc-body ol{margin:0 0 10px;padding-left:22px}.doc-body li{margin:2px 0}
 .doc-body a{color:var(--c,#A3D65C)}
 .doc-ta{min-height:46vh;font-family:inherit;line-height:1.55}
+.dico{font-size:22px;margin-bottom:6px}
+.dfiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.dfiles span{font-size:11.5px;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.06);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dfl{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.dflh{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:10px}
+.dfrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid var(--line);margin-bottom:8px}
+.dfi{font-size:20px}.dfn{flex:1;min-width:0;display:flex;flex-direction:column}.dfn b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dfn span{font-size:11.5px}
+.dthumb{display:block;max-width:100%;max-height:260px;border-radius:12px;margin:-2px 0 10px}
 @keyframes pop{from{transform:scale(.97);opacity:0}}
 .mhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
 .mhead h3{font-size:19px}
@@ -1139,12 +1146,56 @@ function docMD(t){
   });
   close(); return h;
 }
+const fmtSize = b => !b ? "" : b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + " KB" : (b / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+const fileIcon = f => /pdf/i.test(f.type || f.name) ? "📕" : /^image\//.test(f.type || "") ? "🖼️" : /sheet|excel|csv/i.test(f.type || f.name) ? "📊" : /word|document/i.test(f.type || f.name) ? "📘" : "📄";
+async function uploadDocFiles(n, files){
+  const list = [...(n.files || [])];
+  for (const file of files){
+    if (file.size > 50 * 1024 * 1024){ toast(file.name + ": máximo 50 MB", true); continue; }
+    const safe = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w.\-]+/g, "_");
+    const path = n.id + "/" + Date.now() + "-" + safe;
+    if (DEMO){
+      const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(file); });
+      list.push({ path, name: file.name, size: file.size, type: file.type, data });
+    } else {
+      const { error } = await sb.storage.from("docs").upload(path, file, { contentType: file.type || "application/octet-stream" });
+      if (error) throw error;
+      list.push({ path, name: file.name, size: file.size, type: file.type });
+    }
+  }
+  return Store.update("notes", n.id, { files: list });
+}
+async function fileUrl(f){
+  if (f.data) return f.data;
+  const { data, error } = await sb.storage.from("docs").createSignedUrl(f.path, 3600);
+  if (error) throw error; return data.signedUrl;
+}
+async function removeDoc(n){
+  const paths = (n.files || []).map(f => f.path);
+  if (!DEMO && paths.length){ try { await sb.storage.from("docs").remove(paths); } catch(e){} }
+  await Store.remove("notes", n.id);
+}
 function renderDocs(v, p){
-  const docs = S.notes.filter(n => n.project_id === p.id).sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "es"));
-  v.innerHTML = phead(p, '<button class="btn primary" data-act="newDoc">+ Documento</button>') +
+  const docs = S.notes.filter(n => n.project_id === p.id).sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+  v.innerHTML = phead(p, '<label class="btn" style="cursor:pointer">📎 Subir archivos<input type="file" id="docUp" multiple hidden></label><button class="btn primary" data-act="newDoc">+ Documento</button>') +
     '<div style="--c:' + esc(p.color) + '">' +
-    (docs.length ? '<div class="dgrid">' + docs.map(d => '<div class="dcard" data-act="openDoc" data-id="' + d.id + '"><b>' + esc(d.title || "(sin título)") + "</b><p>" + esc(String(d.body || "").replace(/^#+\s*/gm, "").slice(0, 300)) + '</p><div class="dfoot">' + esc(d.kind && d.kind !== "doc" && d.kind !== "note" ? d.kind : "") + "</div></div>").join("") + "</div>"
-      : '<div class="empty">Todavía no hay documentos. Tocá <b>+ Documento</b> para escribir el primero: un SOP, un proceso, accesos, guiones base…</div>') + "</div>";
+    '<div class="help" style="margin:-8px 0 16px">Escribí documentos, SOPs y notas, o subí PDFs, imágenes y archivos para tenerlos guardados acá. Cada documento puede tener texto y archivos adjuntos.</div>' +
+    (docs.length ? '<div class="dgrid">' + docs.map(d => {
+      const fs = d.files || [], txt = String(d.body || "").replace(/^#+\s*/gm, "").trim();
+      return '<div class="dcard" data-act="openDoc" data-id="' + d.id + '"><div class="dico">' + (fs.length && !txt ? fileIcon(fs[0]) : "📝") + "</div><b>" + esc(d.title || "(sin título)") + "</b>" +
+        (txt ? "<p>" + esc(txt.slice(0, 260)) + "</p>" : "") +
+        (fs.length ? '<div class="dfiles">' + fs.slice(0, 3).map(f => "<span>" + fileIcon(f) + " " + esc(f.name) + "</span>").join("") + (fs.length > 3 ? "<span>+" + (fs.length - 3) + "</span>" : "") + "</div>" : "") +
+        '<div class="dfoot">' + esc(fmtD(String(d.updated_at || d.created_at || "").slice(0, 10), { day:"numeric", month:"short", year:"numeric" })) + "</div></div>";
+    }).join("") + "</div>"
+      : '<div class="empty">Todavía no hay documentos. Tocá <b>+ Documento</b> para escribir uno o <b>📎 Subir archivos</b> para guardar PDFs.</div>') + "</div>";
+  $("#docUp").addEventListener("change", async e => {
+    const files = [...e.target.files]; if (!files.length) return;
+    for (const f of files){
+      const ok = await act(async () => { const n = await Store.insert("notes", { project_id: p.id, kind:"doc", title: f.name.replace(/\.[^.]+$/, ""), body:"", files:[] }); await uploadDocFiles(n, [f]); }, "Guardado: " + f.name);
+      if (!ok) break;
+    }
+    render();
+  });
   bind(v, {
     editProject: () => editProject(p),
     newDoc: () => editDoc(p, null),
@@ -1152,23 +1203,58 @@ function renderDocs(v, p){
   });
 }
 function openDoc(p, n){
-  const box = openModal('<div class="mhead" style="--c:' + esc(p.color) + '"><h3>' + esc(n.title || "(sin título)") + '</h3><button class="icon-btn" data-close aria-label="Cerrar">×</button></div>' +
-    '<div class="doc-body" style="--c:' + esc(p.color) + '">' + (docMD(n.body) || '<div class="empty">Documento vacío.</div>') + "</div>" +
-    '<div class="mfoot"><span class="sp"></span><button class="btn" data-copy>Copiar texto</button><button class="btn primary" data-edit>Editar</button></div>', { wide:true, nofocus:true });
+  const fs = n.files || [];
+  const box = openModal('<div class="mhead"><h3>' + esc(n.title || "(sin título)") + '</h3><button class="icon-btn" data-close aria-label="Cerrar">×</button></div>' +
+    (n.body ? '<div class="doc-body" style="--c:' + esc(p.color) + '">' + docMD(n.body) + "</div>" : "") +
+    '<div class="dfl"><div class="dflh">Archivos <span class="dim">' + fs.length + '</span><span class="sp"></span><label class="btn sm" style="cursor:pointer">📎 Adjuntar<input type="file" data-up multiple hidden></label></div>' +
+      (fs.length ? fs.map((f, i) => '<div class="dfrow"><span class="dfi">' + fileIcon(f) + '</span><div class="dfn"><b>' + esc(f.name) + '</b><span class="dim">' + fmtSize(f.size) + '</span></div><a class="btn sm" data-open="' + i + '" href="#">Abrir</a><button class="icon-btn" data-delf="' + i + '" title="Quitar archivo">×</button></div>' +
+        (/^image\//.test(f.type || "") ? '<img class="dthumb" data-img="' + i + '" alt="">' : "")).join("") : '<div class="dim" style="font-size:13px">Sin archivos. Podés adjuntar PDFs, imágenes, Word, Excel…</div>') + "</div>" +
+    '<div class="mfoot"><button class="btn danger" data-del>Eliminar</button><span class="sp"></span><button class="btn" data-pdf>⬇ Guardar como PDF</button><button class="btn primary" data-edit>Editar texto</button></div>', { wide:true, nofocus:true });
+  const reopen = () => { const m = S.notes.find(x => x.id === n.id); if (m) openDoc(p, m); else closeModal(false); };
+  box.querySelectorAll("[data-img]").forEach(async im => { try { im.src = await fileUrl(fs[+im.dataset.img]); } catch(e){ im.remove(); } });
+  box.querySelectorAll("[data-open]").forEach(a => a.onclick = async e => {
+    e.preventDefault(); const w = window.open("", "_blank");
+    try { const u = await fileUrl(fs[+a.dataset.open]); if (w) w.location = u; else location.href = u; } catch(err){ if (w) w.close(); toast("No se pudo abrir: " + err.message, true); }
+  });
+  box.querySelectorAll("[data-delf]").forEach(b => b.onclick = async () => {
+    const f = fs[+b.dataset.delf]; if (!confirm("¿Quitar " + f.name + "?")) return;
+    const ok = await act(async () => { if (!DEMO) await sb.storage.from("docs").remove([f.path]); await Store.update("notes", n.id, { files: fs.filter(x => x !== f) }); }, "Archivo quitado");
+    if (ok){ render(); reopen(); }
+  });
+  box.querySelector("[data-up]").onchange = async e => {
+    const files = [...e.target.files]; if (!files.length) return;
+    const ok = await act(() => uploadDocFiles(n, files), files.length === 1 ? "Archivo subido" : files.length + " archivos subidos");
+    if (ok){ render(); reopen(); }
+  };
   box.querySelector("[data-edit]").onclick = () => editDoc(p, n);
-  box.querySelector("[data-copy]").onclick = async () => { try { await navigator.clipboard.writeText(n.body || ""); toast("Copiado"); } catch(e){ toast("No se pudo copiar", true); } };
+  box.querySelector("[data-del]").onclick = async () => { if (!confirm("¿Eliminar el documento" + (fs.length ? " y sus archivos" : "") + "?")) return; const ok = await act(() => removeDoc(n), "Documento eliminado"); if (ok){ closeModal(false); render(); } };
+  box.querySelector("[data-pdf]").onclick = () => {
+    const w = window.open("", "_blank"); if (!w) return toast("Permití ventanas emergentes para guardar el PDF", true);
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(n.title || "Documento") + '</title><style>body{font-family:Inter,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;color:#111;line-height:1.6}h1{font-size:26px;margin:0 0 4px}.m{color:#666;font-size:12px;margin-bottom:24px}h2{font-size:19px;margin:22px 0 6px}h3{font-size:16px;margin:18px 0 4px}a{color:#2f6b1f}ul,ol{padding-left:22px}.f{margin-top:28px;border-top:1px solid #ddd;padding-top:12px;font-size:13px;color:#444}</style></head><body><h1>' + esc(n.title || "") + '</h1><div class="m">Jardín Urbano · ' + esc(new Date().toLocaleDateString("es-UY", { day:"numeric", month:"long", year:"numeric" })) + "</div>" + docMD(n.body) +
+      (fs.length ? '<div class="f"><b>Archivos adjuntos:</b> ' + fs.map(f => esc(f.name)).join(" · ") + "</div>" : "") + "<script>setTimeout(function(){print()},300)<\/script></body></html>");
+    w.document.close();
+  };
 }
 function editDoc(p, n){
-  formModal({
+  const box = formModal({
     title: n ? "Editar documento" : "Nuevo documento", wide:true, values: n || {},
     fields: [
       { k:"title", l:"Título", full:true, req:true, ph:"Ej: SOP · Cómo cargar una campaña nueva" },
-      { k:"body", l:"Contenido", t:"textarea", full:true, rows:18, ph:"Escribí libre. Tips: # Título, ## Subtítulo, - viñetas, 1. pasos numerados, **negrita**. Los links se vuelven clickeables." }
+      { k:"body", l:"Contenido", t:"textarea", full:true, rows:16, ph:"Escribí libre. Tips: # Título, ## Subtítulo, - viñetas, 1. pasos numerados, **negrita**. Los links se vuelven clickeables." }
     ],
-    onSubmit: v => n ? Store.update("notes", n.id, v) : Store.insert("notes", { ...v, kind:"doc", project_id: p.id }),
-    onDelete: n ? () => Store.remove("notes", n.id) : null
+    onSubmit: async v => {
+      const files = [...(box.querySelector("[data-newf]")?.files || [])];
+      const row = n ? await Store.update("notes", n.id, { ...v, updated_at: new Date().toISOString() }) : await Store.insert("notes", { ...v, kind:"doc", project_id: p.id, files:[] });
+      if (files.length) await uploadDocFiles(row, files);
+    },
+    onDelete: n ? () => removeDoc(n) : null
   });
-  const ta = document.querySelector('#modal textarea[name="body"]'); if (ta) ta.classList.add("doc-ta");
+  const ta = box.querySelector('textarea[name="body"]'); if (ta) ta.classList.add("doc-ta");
+  if (!n){
+    const d = document.createElement("div"); d.className = "full";
+    d.innerHTML = '<label class="f">Adjuntar archivos (opcional)</label><input type="file" class="inp" data-newf multiple><div class="help">PDFs, imágenes, Word, Excel… hasta 50 MB cada uno.</div>';
+    box.querySelector(".mfields").appendChild(d);
+  }
 }
 
 /* =========================================================
