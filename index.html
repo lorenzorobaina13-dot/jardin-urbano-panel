@@ -266,6 +266,30 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .icard .ot{font-weight:600}
 .icard .og{font-size:12.5px;color:var(--dim);margin-top:6px;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mcard.past{opacity:.6}
+.sp{flex:1}
+.grab .ghead{display:flex;gap:14px;align-items:center}
+.grab .gtitle h3{margin:2px 0 0;font-size:19px}
+.grab.past{opacity:.7}
+.gcols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
+.gcols h4{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:14px}
+.gcols h4 .sp{flex:1}
+.gitem{display:flex;gap:12px;padding:11px 13px;border-radius:14px;background:rgba(0,0,0,.22);border:1px solid var(--line);cursor:pointer;margin-bottom:8px;transition:border-color .15s}
+.gitem:hover{border-color:var(--line2)}
+.gn{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;background:rgba(192,132,252,.16);color:#D8B4FE}
+.gn.st{background:rgba(96,165,250,.16);color:#93C5FD}
+.gtx{min-width:0;flex:1}.gtx b{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
+.ghook{font-size:12.5px;color:#D8B4FE;margin-top:4px;font-style:italic;overflow-wrap:anywhere}
+.gparts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:11.5px}
+.gp{padding:2px 8px;border-radius:999px;border:1px dashed var(--line2);color:var(--dim2)}
+.gp.on{border-style:solid;border-color:rgba(163,214,92,.45);color:#C5E89A;background:rgba(163,214,92,.08)}
+.gprev{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.hgroup{margin-top:14px}.hgt{font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.hrow{padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(0,0,0,.22);margin-bottom:8px;cursor:pointer}
+.hrow:hover{border-color:var(--line2)}
+.hrow .hk{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.hrow.none .hk{font-size:13px;font-weight:500;color:var(--dim2);font-style:italic}
+.hrow .hs{font-size:12px;color:var(--dim);margin-top:4px;overflow-wrap:anywhere}
+@media (max-width:760px){.gcols{grid-template-columns:1fr}}
 .past-list{margin-top:14px}
 .past-list summary{cursor:pointer;color:var(--dim);font-size:13px;font-weight:600}
 .ogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
@@ -398,8 +422,8 @@ const CONFIG = {
 
 /* ========================================================= */
 const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
-const TABLES = ["projects","entries","notes","posts","tasks","landings","meetings"];
-const S = { projects:[], entries:[], notes:[], posts:[], tasks:[], landings:[], meetings:[], user:null };
+const TABLES = ["projects","entries","notes","posts","tasks","landings","meetings","grabaciones"];
+const S = { projects:[], entries:[], notes:[], posts:[], tasks:[], landings:[], meetings:[], grabaciones:[], user:null };
 const UI = { oView:"ideas", oFmt:"", tView:"tablero", mq:"", cf:{}, chart:{}, month:null, pview:"mes", pf:[], tWho:"", tProj:"" };
 let sb = null, cur = null;
 
@@ -577,6 +601,7 @@ const Store = {
     if (!DEMO){ const { error } = await sb.from(t).delete().eq("id", id); if (error) throw error; }
     S[t] = S[t].filter(r => r.id !== id);
     if (t === "meetings") S.tasks.forEach(k => { if (k.meeting_id === id) k.meeting_id = null; });
+    if (t === "grabaciones") S.posts.forEach(k => { if (k.grabacion_id === id) k.grabacion_id = null; });
     if (t === "projects"){ S.entries = S.entries.filter(e => e.project_id !== id); S.notes = S.notes.filter(n => n.project_id !== id); S.tasks.forEach(k => { if (k.project_id === id) k.project_id = null; }); }
     if (DEMO) DemoDB.save();
   }
@@ -832,7 +857,7 @@ function lineChart(points, color, unit){
    ========================================================= */
 function bubbleStat(p){
   if (p.type === "campaign"){ const m = heroMetric(p); if (!m) return { big:"—", lbl:"sin métricas" }; return { big: fmtVal(totals(p)[m.key], m.unit), lbl: m.name }; }
-  if (p.type === "organic"){ const t0 = today(), wk = addDays(t0, 7); const n = S.posts.filter(x => x.fecha && x.fecha >= t0 && x.fecha <= wk).length; return n ? { big: n, lbl: "grabaciones esta semana" } : { big: S.posts.filter(x => !x.fecha).length, lbl: "ideas guardadas" }; }
+  if (p.type === "organic"){ const t0 = today(), wk = addDays(t0, 7); const n = S.grabaciones.filter(g => g.fecha >= t0 && g.fecha <= wk).length; return n ? { big: n, lbl: n === 1 ? "grabación esta semana" : "grabaciones esta semana" } : { big: S.posts.filter(x => !x.grabacion_id).length, lbl: "ideas guardadas" }; }
   if (p.type === "tasks") return { big: S.tasks.filter(t => t.status !== "hecho").length, lbl: "pendientes" };
   if (p.type === "landing") return { big: S.landings.length, lbl: "landings guardadas" };
   if (p.type === "docs") return { big: S.notes.filter(n => n.project_id === p.id).length, lbl: "documentos" };
@@ -842,7 +867,7 @@ function renderHome(v){
   const t0 = today();
   const pend = S.tasks.filter(t => t.status !== "hecho");
   const late = pend.filter(t => t.vence && t.vence < t0);
-  const wk = S.posts.filter(p => p.fecha && p.fecha >= t0 && p.fecha <= addDays(t0, 7));
+  const wk = S.grabaciones.filter(g => g.fecha >= t0 && g.fecha <= addDays(t0, 7));
   const act = S.projects.filter(p => p.type === "campaign" && p.status === "Activa");
   const h = new Date().getHours(), hi = h < 12 ? "Buen día" : h < 20 ? "Buenas tardes" : "Buenas noches";
   const bubbles = sortedProjects().map(p => {
@@ -853,15 +878,15 @@ function renderHome(v){
       (p.type === "campaign" ? '<span class="stt">' + esc(p.status || "") + "</span>" : "") + "</a></div>";
   }).join("");
   const nextT = [...pend].sort((a,b) => (a.vence || "9999").localeCompare(b.vence || "9999")).slice(0, 6);
-  const nextP = [...S.posts].filter(p => p.fecha && p.fecha >= t0).sort((a,b) => (a.fecha + (a.hora||"")).localeCompare(b.fecha + (b.hora||""))).slice(0, 6);
+  const nextP = recsSorted().filter(g => g.fecha >= t0).slice(0, 6);
   v.innerHTML =
     '<section class="home-head"><div><div class="eyebrow">Jardín Urbano · Panel</div><h1>' + hi + ", " + esc(meName()) + '</h1><div class="dim">' + esc(new Date().toLocaleDateString("es-UY", { weekday:"long", day:"numeric", month:"long" })) + "</div></div>" +
     '<div class="stats"><div class="stat"><b>' + pend.length + '</b><span>Tareas pendientes</span></div><div class="stat' + (late.length ? " alert" : "") + '"><b>' + late.length + '</b><span>Vencidas</span></div><div class="stat"><b>' + wk.length + '</b><span>Grabaciones próximos 7 días</span></div><div class="stat"><b>' + act.length + "</b><span>Campañas activas</span></div></div></section>" +
     '<section class="orbit">' + bubbles + '<div class="bwrap"><a class="bubble add" href="#" data-act="newProject"><span>+</span>Nuevo proyecto</a></div></section>' +
     '<section class="cols2"><div class="panel"><h3>Próximas tareas <button class="btn sm" data-act="newTask">+ Tarea</button></h3>' +
       (nextT.length ? nextT.map(taskRow).join("") : '<div class="empty">No hay tareas pendientes 🎉</div>') + "</div>" +
-    '<div class="panel"><h3>Próximas grabaciones <button class="btn sm" data-act="newPost">+ Idea</button></h3>' +
-      (nextP.length ? nextP.map(postRow).join("") : '<div class="empty">No hay grabaciones agendadas.</div>') + "</div></section>";
+    '<div class="panel"><h3>Próximas grabaciones <a class="btn sm" href="#/p/' + esc((S.projects.find(p => p.type === "organic") || {}).id || "") + '">Ver todo</a></h3>' +
+      (nextP.length ? nextP.map(recRow).join("") : '<div class="empty">No hay grabaciones agendadas.</div>') + "</div></section>";
   bind(v, {
     newProject: () => editProject(null),
     newTask: () => editTask(null),
@@ -876,6 +901,10 @@ function taskRow(t){
     (pj ? '<span class="chip" style="--c:' + esc(pj.color) + '"><i></i>' + esc(pj.name) + "</span>" : "") +
     (t.vence ? '<span class="sub' + (late ? " late" : "") + '">' + esc(fmtD(t.vence)) + "</span>" : "") +
     (t.assignee ? '<span class="who" style="--ac:' + (m?.color || "#8FA398") + '" title="' + esc(t.assignee) + '">' + esc(initial(t.assignee)) + "</span>" : "") + "</div>";
+}
+function recRow(g){
+  const its = itemsOf(g.id), r = its.filter(x => !isStory(x)).length, h = its.length - r, op = S.projects.find(p => p.type === "organic");
+  return '<a class="row-item" href="#/p/' + esc(op ? op.id : "") + '" style="text-decoration:none;color:inherit"><span class="dot" style="--c:#C084FC"></span><span class="sub">🎬 ' + esc(fmtD(g.fecha, { weekday:"short", day:"numeric" })) + (g.hora ? " · " + esc(g.hora) : "") + '</span><span class="tx">' + esc(g.titulo || g.lugar || "Grabación") + '</span><span class="dim" style="font-size:12px;white-space:nowrap">' + r + " reels · " + h + " historias</span></a>";
 }
 function postRow(p){
   return '<div class="row-item" data-act="post" data-id="' + p.id + '"><span class="dot" style="--c:#C084FC"></span><span class="sub">🎬 ' + esc(fmtD(p.fecha, { weekday:"short", day:"numeric" })) + (p.hora ? " · " + esc(p.hora) : "") + '</span><span class="tx">' + esc(ptitle(p)) + "</span>" + (p.lugar ? '<span class="sub">📍 ' + esc(p.lugar) + "</span>" : "") + "</div>";
@@ -1153,86 +1182,136 @@ const durOf = text => {
   const s = Math.max(1, Math.round(w / 2.5));
   return s < 60 ? "≈ " + s + " s" : "≈ " + Math.floor(s / 60) + ":" + pad(s % 60) + " min";
 };
-function recCard(x){
-  const d = parseD(x.fecha), past = x.fecha < today();
-  return '<div class="mcard' + (past ? " past" : "") + '" data-act="editPost" data-id="' + x.id + '"><div class="mday"><b>' + d.getDate() + "</b><span>" + esc(d.toLocaleDateString("es-UY", { month:"short" }).replace(".", "")) + "</span></div>" +
-    '<div class="mbody"><h4>' + esc(ptitle(x)) + '</h4><div class="mfoot2" style="margin-top:2px">' +
-    "<span>🎬 " + esc(fmtD(x.fecha, { weekday:"long" })) + (x.hora ? " · " + esc(x.hora) + " hs" : "") + "</span>" +
-    (x.lugar ? "<span>📍 " + esc(x.lugar) + "</span>" : "") +
-    (fullScript(x) ? '<span class="chip">Guion ' + durOf(fullScript(x)) + "</span>" : '<span class="chip">Sin guion</span>') + "</div></div></div>";
+/* grabaciones = eventos; cada una tiene reels (hook/cuerpo/CTA) e historias */
+const isStory = x => x.tipo === "historia";
+const recsSorted = () => [...S.grabaciones].sort((a, b) => (a.fecha + (a.hora || "")).localeCompare(b.fecha + (b.hora || "")));
+const itemsOf = gid => S.posts.filter(x => (x.grabacion_id || null) === gid).sort((a, b) => (a.orden || 0) - (b.orden || 0) || String(a.created_at).localeCompare(String(b.created_at)));
+const recName = g => g ? (fmtD(g.fecha, { weekday:"long", day:"numeric", month:"long" }) + (g.hora ? " · " + g.hora + " hs" : "") + (g.lugar ? " · " + g.lugar : "")) : "";
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+function reelRow(x, n){
+  const part = (ok, l) => '<span class="gp' + (ok ? " on" : "") + '">' + (ok ? "✓ " : "") + l + "</span>";
+  const has = k => !!String(x[k] || "").trim();
+  const body = x.guion || x.caption;
+  return '<div class="gitem" data-act="editPost" data-id="' + x.id + '"><span class="gn">' + n + '</span><div class="gtx"><b>' + esc(ptitle(x)) + "</b>" +
+    (has("gancho") ? '<div class="ghook">“' + esc(x.gancho) + '”</div>' : "") +
+    '<div class="gparts">' + part(has("gancho"), "Hook") + part(!!String(body || "").trim(), "Cuerpo") + part(has("cta"), "CTA") +
+    (fullScript(x) ? '<span class="dim">' + durOf(fullScript(x)) + "</span>" : "") + "</div></div></div>";
 }
-function ideaCard(x){
-  const sc = fullScript(x);
-  return '<div class="icard" data-act="editPost" data-id="' + x.id + '"><div class="ot">' + esc(ptitle(x)) + "</div>" +
-    (sc ? '<div class="og">' + esc(sc) + "</div>" : "") +
-    '<div class="kmeta" style="margin-left:0">' + (sc ? "<span>📝 " + durOf(sc) + "</span>" : '<span class="dim">Sin guion</span>') + '<span style="flex:1"></span>' +
-    '<button class="btn sm" data-act="agendar" data-id="' + x.id + '">📅 Agendar grabación</button></div></div>';
+function storyRow(x, n){
+  const lines = String(x.notes || "").split("\n").filter(l => /^\s*\d+[.)]\s/.test(l)).length;
+  return '<div class="gitem" data-act="editPost" data-id="' + x.id + '"><span class="gn st">' + n + '</span><div class="gtx"><b>' + esc(ptitle(x)) + "</b>" +
+    '<div class="gparts">' + (lines ? '<span class="gp on">' + lines + " historias</span>" : "") + (x.notes ? '<span class="dim gprev">' + esc(String(x.notes).split("\n").find(l => l.trim()) || "") + "</span>" : '<span class="dim">Sin detalle</span>') + "</div></div></div>";
+}
+function recBlock(g, past){
+  const its = itemsOf(g.id), reels = its.filter(x => !isStory(x)), stories = its.filter(isStory);
+  const d = parseD(g.fecha);
+  return '<div class="panel grab' + (past ? " past" : "") + '"><div class="ghead"><div class="mday"><b>' + d.getDate() + "</b><span>" + esc(d.toLocaleDateString("es-UY", { month:"short" }).replace(".", "")) + "</span></div>" +
+    '<div class="gtitle"><div class="eyebrow" style="margin:0">Grabación</div><h3>' + esc(g.titulo || cap(fmtD(g.fecha, { weekday:"long", day:"numeric", month:"long" }))) + '</h3><div class="mfoot2" style="margin-top:4px">' +
+    (g.titulo ? "<span>📅 " + esc(fmtD(g.fecha, { weekday:"long", day:"numeric", month:"long" })) + "</span>" : "") +
+    (g.hora ? "<span>🕒 " + esc(g.hora) + " hs</span>" : "") + (g.lugar ? "<span>📍 " + esc(g.lugar) + "</span>" : "") +
+    "<span>🎬 " + reels.length + (reels.length === 1 ? " reel" : " reels") + "</span><span>📱 " + stories.length + (stories.length === 1 ? " historia" : " historias") + "</span></div></div>" +
+    '<span class="sp"></span><button class="btn sm" data-act="editRec" data-id="' + g.id + '">Editar</button></div>' +
+    (g.notes ? '<p class="pdesc" style="margin:12px 0 0">' + esc(g.notes) + "</p>" : "") +
+    '<div class="gcols"><div><h4>🎬 Reels <span class="dim">' + reels.length + '</span><span class="sp"></span><button class="btn sm" data-act="addItem" data-g="' + g.id + '" data-t="reel">+ Reel</button></h4>' +
+      (reels.length ? reels.map((x, i) => reelRow(x, i + 1)).join("") : '<div class="empty">Sin reels.</div>') + "</div>" +
+    '<div><h4>📱 Historias <span class="dim">' + stories.length + '</span><span class="sp"></span><button class="btn sm" data-act="addItem" data-g="' + g.id + '" data-t="historia">+ Historia</button></h4>' +
+      (stories.length ? stories.map((x, i) => storyRow(x, i + 1)).join("") : '<div class="empty">Sin historias.</div>') + "</div></div></div>";
+}
+function hooksView(){
+  const groups = [...recsSorted().map(g => ({ g, its: itemsOf(g.id).filter(x => !isStory(x)) })), { g:null, its: itemsOf(null).filter(x => !isStory(x)) }].filter(o => o.its.length);
+  const all = groups.flatMap(o => o.its), withHook = all.filter(x => String(x.gancho || "").trim());
+  return '<div class="panel"><h3>🪝 Solo hooks <span class="dim" style="font-family:Inter;font-size:12px;font-weight:400">' + withHook.length + " de " + all.length + ' reels tienen hook</span><span class="sp"></span>' +
+    (withHook.length ? '<button class="btn sm" data-act="copyHooks">Copiar todos</button>' : "") + "</h3>" +
+    (groups.length ? groups.map(o => '<div class="hgroup"><div class="hgt">' + (o.g ? "🎬 " + esc(cap(recName(o.g))) : "💡 Ideas sin grabación") + "</div>" +
+      o.its.map(x => { const h = String(x.gancho || "").trim();
+        return '<div class="hrow' + (h ? "" : " none") + '" data-act="editPost" data-id="' + x.id + '"><div class="hk">' + (h ? "“" + esc(h) + "”" : "Sin hook todavía") + '</div><div class="hs">' + esc(ptitle(x)) + "</div></div>"; }).join("") + "</div>").join("")
+      : '<div class="empty">Todavía no hay reels.</div>') + "</div>";
 }
 function renderOrganic(v, p){
-  const t0 = today();
-  const proximas = S.posts.filter(x => x.fecha && x.fecha >= t0).sort((a, b) => (a.fecha + (a.hora || "")).localeCompare(b.fecha + (b.hora || "")));
-  const ideas = S.posts.filter(x => !x.fecha).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  const pasadas = S.posts.filter(x => x.fecha && x.fecha < t0).sort((a, b) => b.fecha.localeCompare(a.fecha));
-  v.innerHTML = phead(p, '<button class="btn primary" data-act="newPost">+ Nueva idea</button>') +
-    '<div class="qadd"><input class="inp" id="qIdea" placeholder="Anotá una idea y apretá Enter… ej: 3 errores al regar en verano"><button class="btn primary" data-act="qAdd">Guardar idea</button></div>' +
-    '<div class="cols2" style="margin-top:0;align-items:start">' +
-      '<div class="panel"><h3>📅 Próximas grabaciones <span class="cnt dim" style="font-family:Inter;font-size:12px">' + proximas.length + "</span></h3>" +
-        '<div class="mlist2">' + (proximas.length ? proximas.map(recCard).join("") : '<div class="empty">No hay grabaciones agendadas. Abrí una idea y tocá <b>📅 Agendar grabación</b>.</div>') + "</div>" +
-        (pasadas.length ? '<details class="past-list"><summary>Ya grabadas (' + pasadas.length + ")</summary><div class=\"mlist2\" style=\"margin-top:10px\">" + pasadas.map(recCard).join("") + "</div></details>" : "") +
-      "</div>" +
-      '<div class="panel"><h3>💡 Ideas <span class="cnt dim" style="font-family:Inter;font-size:12px">' + ideas.length + "</span></h3>" +
-        '<div class="mlist2">' + (ideas.length ? ideas.map(ideaCard).join("") : '<div class="empty">Todavía no hay ideas. Escribí una arriba y apretá Enter.</div>') + "</div>" +
-      "</div>" +
-    "</div>";
+  const t0 = today(), view = UI.ov || "grab";
+  const recs = recsSorted(), prox = recs.filter(g => g.fecha >= t0), past = recs.filter(g => g.fecha < t0).reverse();
+  const ideas = itemsOf(null);
+  v.innerHTML = phead(p, '<button class="btn" data-act="newIdea">+ Idea</button><button class="btn primary" data-act="newRec">+ Grabación</button>') +
+    '<div class="fbar"><div class="seg"><button class="' + (view === "grab" ? "on" : "") + '" data-act="ov" data-k="grab">📅 Grabaciones</button><button class="' + (view === "hooks" ? "on" : "") + '" data-act="ov" data-k="hooks">🪝 Solo hooks</button></div></div>' +
+    (view === "hooks" ? hooksView() :
+      '<div class="mlist2">' + (prox.length ? prox.map(g => recBlock(g)).join("") : '<div class="empty">No hay grabaciones agendadas. Tocá <b>+ Grabación</b> para crear una.</div>') + "</div>" +
+      (past.length ? '<details class="past-list"><summary>Grabaciones pasadas (' + past.length + ')</summary><div class="mlist2" style="margin-top:12px">' + past.map(g => recBlock(g, true)).join("") + "</div></details>" : "") +
+      '<div class="panel" style="margin-top:18px"><h3>💡 Ideas sin grabación <span class="cnt dim" style="font-family:Inter;font-size:12px">' + ideas.length + "</span></h3>" +
+        '<div class="qadd"><input class="inp" id="qIdea" placeholder="Anotá una idea de reel y apretá Enter…"><button class="btn primary" data-act="qAdd">Guardar idea</button></div>' +
+        '<div class="mlist2">' + (ideas.length ? ideas.map((x, i) => isStory(x) ? storyRow(x, "📱") : reelRow(x, "🎬")).join("") : '<div class="empty">No hay ideas sueltas.</div>') + "</div></div>");
   const qi = $("#qIdea");
   const addQuick = async () => {
     const title = (qi.value || "").trim(); if (!title) return qi.focus();
-    const ok = await act(() => Store.insert("posts", { titulo: title, status:"idea", format:"Reel", platforms:[], fecha:null }), "Idea guardada");
+    const ok = await act(() => Store.insert("posts", { titulo: title, tipo:"reel", status:"idea", format:"Reel", platforms:[], fecha:null, grabacion_id:null }), "Idea guardada");
     if (ok) setTimeout(() => { const q = $("#qIdea"); if (q) q.focus(); }, 50);
   };
-  qi.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); addQuick(); } });
+  if (qi) qi.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); addQuick(); } });
   bind(v, {
     editProject: () => editProject(p),
+    ov: d => { UI.ov = d.k; render(); },
     qAdd: addQuick,
-    newPost: () => editPost(null),
+    newIdea: () => editPost(null, { tipo:"reel" }),
+    newRec: () => editRec(null),
+    editRec: d => editRec(S.grabaciones.find(g => g.id === d.id)),
+    addItem: d => editPost(null, { tipo: d.t, grabacion_id: d.g }),
     editPost: d => editPost(S.posts.find(x => x.id === d.id)),
-    agendar: (d, el, e) => { e.stopPropagation(); scheduleRec(S.posts.find(x => x.id === d.id)); }
+    copyHooks: async () => {
+      const txt = S.posts.filter(x => !isStory(x) && String(x.gancho || "").trim()).map(x => "• " + x.gancho.trim()).join("\n");
+      try { await navigator.clipboard.writeText(txt); toast("Hooks copiados"); } catch(e){ toast("No se pudo copiar", true); }
+    }
   });
 }
-function scheduleRec(x){
-  if (!x) return;
+function editRec(g){
   formModal({
-    title: "Agendar grabación", submit: "Agendar",
-    values: { fecha: x.fecha || today(), hora: x.hora || "", lugar: x.lugar || "" },
+    title: g ? "Grabación" : "Nueva grabación", submit: g ? "Guardar" : "Crear",
+    values: g || { fecha: today() },
     fields: [
-      { k:"_t", l:"", t:"help", full:true },
-      { k:"fecha", l:"Fecha de grabación", t:"date", req:true }, { k:"hora", l:"Hora", t:"time" },
-      { k:"lugar", l:"Dónde se graba", full:true, ph:"Vivero, huerta de la escuela…" }
-    ].filter(f => f.t !== "help"),
-    onSubmit: v => Store.update("posts", x.id, { fecha: v.fecha, hora: v.hora, lugar: v.lugar })
+      { k:"fecha", l:"Fecha", t:"date", req:true }, { k:"hora", l:"Hora", t:"time" },
+      { k:"lugar", l:"Dónde se graba", full:true, ph:"Iglesia, vivero, huerta de la escuela…" },
+      { k:"titulo", l:"Nombre (opcional)", full:true, ph:"Ej: Grabación con Pablo" },
+      { k:"notes", l:"Notas", t:"textarea", full:true, rows:3, ph:"Qué llevar, quién graba, etc." }
+    ],
+    onSubmit: v => g ? Store.update("grabaciones", g.id, v) : Store.insert("grabaciones", v),
+    onDelete: g ? () => Store.remove("grabaciones", g.id) : null
   });
 }
-function editPost(x){
+function editPost(x, preset = {}){
+  const tipo0 = x ? (x.tipo || "reel") : (preset.tipo || "reel");
+  const recOpts = [{ v:"", l:"— Sin grabación (queda como idea) —" }, ...recsSorted().map(g => ({ v:g.id, l: cap(recName(g)) }))];
   const box = formModal({
-    title: x ? "Idea" : "Nueva idea", wide:true,
-    values: x ? { titulo: ptitle(x) === "(sin título)" ? "" : ptitle(x), fecha: x.fecha, hora: x.hora, lugar: x.lugar, guion: fullScript(x), notes: x.notes } : {},
+    title: x ? (tipo0 === "historia" ? "Historia" : "Reel") : (tipo0 === "historia" ? "Nueva historia" : "Nuevo reel"), wide:true,
+    values: x ? { tipo: tipo0, titulo: ptitle(x) === "(sin título)" ? "" : ptitle(x), grabacion_id: x.grabacion_id || "", gancho: x.gancho, guion: x.guion || x.caption, cta: x.cta, notes: x.notes }
+              : { tipo: tipo0, grabacion_id: preset.grabacion_id || "" },
     fields: [
-      { k:"titulo", l:"Idea", full:true, req:true, ph:"Ej: 3 errores al regar el césped en verano" },
-      { k:"guion", l:"Guion", t:"textarea", full:true, rows:12, ph:"Escribí lo que se dice y lo que se muestra…" },
-      { k:"fecha", l:"Fecha de grabación (opcional)", t:"date" }, { k:"hora", l:"Hora", t:"time" },
-      { k:"lugar", l:"Dónde se graba", full:true, ph:"Vivero, huerta de la escuela…" },
-      { k:"notes", l:"Notas", t:"textarea", full:true, rows:3, ph:"Materiales, referencias, ideas de planos…" }
+      { k:"tipo", l:"Tipo", t:"select", o:[{ v:"reel", l:"🎬 Reel" }, { v:"historia", l:"📱 Historia" }] },
+      { k:"grabacion_id", l:"Grabación", t:"select", o: recOpts },
+      { k:"titulo", l:"Título", full:true, req:true, ph:"Ej: 3 errores al regar el césped en verano" },
+      { k:"gancho", l:"Hook", t:"textarea", full:true, rows:2, ph:"La primera frase que engancha…" },
+      { k:"guion", l:"Cuerpo", t:"textarea", full:true, rows:8, ph:"Lo que se dice y se muestra…" },
+      { k:"cta", l:"CTA", t:"textarea", full:true, rows:2, ph:"Ej: Comentá PODA y te paso el calendario" },
+      { k:"notes", l:"Notas", t:"textarea", full:true, rows:3, ph:"Materiales, referencias, planos…" }
     ],
     onSubmit: v => {
-      const row = { titulo: v.titulo, guion: v.guion, gancho: "", cta: "", fecha: v.fecha || null, hora: v.hora, lugar: v.lugar, notes: v.notes };
-      return x ? Store.update("posts", x.id, row) : Store.insert("posts", { ...row, status:"idea", format:"Reel", platforms:[] });
+      const row = { tipo: v.tipo, titulo: v.titulo, grabacion_id: v.grabacion_id || null, gancho: v.gancho, guion: v.guion, cta: v.cta, notes: v.notes, fecha: null, format: v.tipo === "historia" ? "Historia" : "Reel" };
+      if (x) return Store.update("posts", x.id, row);
+      const n = S.posts.filter(y => (y.grabacion_id || null) === row.grabacion_id && (y.tipo || "reel") === row.tipo).reduce((m, y) => Math.max(m, y.orden || 0), 0);
+      return Store.insert("posts", { ...row, orden: n + 1, status:"idea", platforms:[] });
     },
     onDelete: x ? () => Store.remove("posts", x.id) : null
   });
-  const f = box.querySelector("form"), g = f.elements.guion;
-  const counter = document.createElement("div"); counter.className = "help"; g.after(counter);
-  const upd = () => { const w = wordsOf(g.value); counter.textContent = w ? w + " palabras · duración hablada " + durOf(g.value) : ""; };
-  g.addEventListener("input", upd); upd();
+  const f = box.querySelector("form");
+  const wrap = k => f.elements[k].closest("div");
+  const lab = k => wrap(k).querySelector("label");
+  const sync = () => {
+    const st = f.elements.tipo.value === "historia";
+    ["gancho", "guion", "cta"].forEach(k => wrap(k).hidden = st);
+    lab("notes").textContent = st ? "Historias (qué se graba, textos, encuestas)" : "Notas";
+    f.elements.notes.rows = st ? 12 : 3;
+  };
+  f.elements.tipo.addEventListener("change", sync); sync();
+  const counter = document.createElement("div"); counter.className = "help"; f.elements.cta.after(counter);
+  const upd = () => { const t = [f.elements.gancho.value, f.elements.guion.value, f.elements.cta.value].join(" "); const w = wordsOf(t); counter.textContent = w ? w + " palabras · duración hablada " + durOf(t) : ""; };
+  ["gancho", "guion", "cta"].forEach(k => f.elements[k].addEventListener("input", upd)); upd();
 }
 
 /* =========================================================
@@ -1584,19 +1663,23 @@ function seedDemo(){
     T("Subir videos de testimonio a GHL", { assignee:"Lorenzo", status:"hecho" })
   ];
   const Po = (n, o) => ({ id: uid(), fecha: n == null ? null : addDays(t0, n), hora:"", platforms:["ig"], format:"Reel", status:"idea", titulo:"", gancho:"", guion:"", cta:"", lugar:"", responsable:"Pablo", caption:"", media_url:"", link:"", notes:"", created_at: now, ...o });
+  const G = (n, o) => ({ id: uid(), fecha: addDays(t0, n), hora:"", lugar:"", titulo:"", notes:"", created_at: now, ...o });
+  const g1 = G(-3, { lugar:"Jardín de la escuela" }), g2 = G(0, { hora:"10:00", lugar:"Iglesia", titulo:"Grabación con Pablo" });
+  const grabaciones = [g1, g2];
   const posts = [
-    Po(-3, { titulo:"3 errores al regar el césped en verano", guion:"¿Regás al mediodía? Estás quemando tu césped.\n\nError 1: regar al mediodía…\nError 2: poquito todos los días…", lugar:"Jardín de la escuela" }),
-    Po(2, { hora:"10:00", lugar:"Huerta de la escuela", titulo:"Poda de verano paso a paso", guion:"Si podás así en verano, tu planta no llega a marzo.\n\nMostrar tijera limpia.\nCorte en bisel por encima del nudo…" }),
-    Po(5, { titulo:"Plantas que aguantan el sol de enero" }),
-    Po(null, { titulo:"Testimonio de alumna del curso" }),
-    Po(null, { titulo:"Encuesta: ¿qué querés aprender?" })
+    Po(null, { grabacion_id: g1.id, tipo:"reel", orden:1, titulo:"3 errores al regar el césped en verano", gancho:"¿Regás al mediodía? Estás quemando tu césped.", guion:"Error 1: regar al mediodía…\nError 2: poquito todos los días…", cta:"Guardalo para el verano" }),
+    Po(null, { grabacion_id: g2.id, tipo:"reel", orden:1, titulo:"Poda de verano paso a paso", gancho:"Si podás así en verano, tu planta no llega a marzo.", guion:"Mostrar tijera limpia.\nCorte en bisel por encima del nudo…" }),
+    Po(null, { grabacion_id: g2.id, tipo:"reel", orden:2, titulo:"Recorrida por Jardín Urbano." }),
+    Po(null, { grabacion_id: g2.id, tipo:"historia", orden:1, format:"Historia", titulo:"Día 1 — Arrancamos en el jardín", notes:"1. Foto general del patio.\n2. Foto espontánea de Pablo entre las plantas.\n3. Primer plano de una planta con brotes nuevos." }),
+    Po(null, { tipo:"reel", titulo:"Testimonio de alumna del curso" }),
+    Po(null, { tipo:"historia", format:"Historia", titulo:"Encuesta: ¿qué querés aprender?" })
   ];
   const notes = [{ id: uid(), project_id: ces.id, kind:"link", title:"Administrador de anuncios", url:"https://adsmanager.facebook.com/", body:"", created_at: now }];
   const landings = [];
   const mt1 = { id: uid(), fecha: addDays(t0, -2), titulo:"Reunión semanal", asistentes:["Lorenzo","Pablo"], resumen:"Repasamos la campaña de huerta: el CPL viene subiendo en la última semana.\nPablo quiere empezar a armar el pack de Navidad.", acuerdos:"Renovar creativos de huerta\nDefinir precios del pack de Navidad antes del 15", link:"", created_at: now, updated_at: now };
   tasks[1].meeting_id = mt1.id; tasks[2].meeting_id = mt1.id;
   notes.push({ id: uid(), project_id: doc.id, kind:"doc", title:"SOP · Responder un lead nuevo", body:"# Objetivo\nQue ningún lead quede sin respuesta más de 1 hora.\n\n## Pasos\n1. Entra el lead desde Meta al CRM de GHL.\n2. Mandar el WhatsApp de bienvenida con el **PDF de la huerta**.\n3. Si no responde en 24 h, segundo mensaje.\n\n## Notas\n- Horario de respuesta: 9 a 19 h\n- Plantillas en https://app.gohighlevel.com", url:"", created_at: now });
-  return { projects:[ces, cur, org, lan, tas, doc], entries, notes, posts, tasks, landings, meetings:[mt1] };
+  return { projects:[ces, cur, org, lan, tas, doc], entries, notes, posts, tasks, landings, meetings:[mt1], grabaciones };
 }
 
 boot();
